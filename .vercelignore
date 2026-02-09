@@ -1,0 +1,6 @@
+.env
+fplan_v2/frontend/.env
+.venv/
+__pycache__/
+*.pyc
+fplan_v2/tests/

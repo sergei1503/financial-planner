@@ -1,7 +1,10 @@
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { UserButton } from '@clerk/clerk-react';
 import { Moon, Sun } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+
+const clerkEnabled = !!import.meta.env.VITE_CLERK_PUBLISHABLE_KEY;
 
 export function Header() {
   const { t, i18n } = useTranslation();
@@ -39,6 +42,7 @@ export function Header() {
         <Button variant="outline" size="sm" onClick={toggleLanguage}>
           {i18n.language === 'he' ? 'EN' : '\u05E2\u05D1'}
         </Button>
+        {clerkEnabled && <UserButton afterSignOutUrl="/sign-in" />}
       </div>
     </header>
   );

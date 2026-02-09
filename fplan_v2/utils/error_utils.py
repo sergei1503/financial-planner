@@ -6,20 +6,22 @@ planning application. It includes custom exception classes and decorators for
 consistent error reporting across the codebase.
 """
 
+import os
 import traceback
 import logging
 from functools import wraps
 import sys
 from datetime import datetime
 
-# Configure logging
+# Configure logging — skip file handler on serverless (read-only filesystem)
+_handlers = [logging.StreamHandler(sys.stdout)]
+if not os.getenv("VERCEL"):
+    _handlers.append(logging.FileHandler("financial_planner.log"))
+
 logging.basicConfig(
     level=logging.DEBUG,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    handlers=[
-        logging.FileHandler("financial_planner.log"),
-        logging.StreamHandler(sys.stdout),
-    ],
+    handlers=_handlers,
 )
 
 logger = logging.getLogger(__name__)

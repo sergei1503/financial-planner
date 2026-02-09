@@ -1,6 +1,8 @@
 {
-  "buildCommand": "cd fplan_v2/frontend && npm install && npm run build",
+  "installCommand": "cd fplan_v2/frontend && npm install",
+  "buildCommand": "cd fplan_v2/frontend && npm run build",
   "outputDirectory": "fplan_v2/frontend/dist",
+  "framework": null,
   "rewrites": [
     { "source": "/api/(.*)", "destination": "/api/index.py" },
     { "source": "/health", "destination": "/api/index.py" },
@@ -8,7 +10,6 @@
   ],
   "functions": {
     "api/index.py": {
-      "runtime": "@vercel/python@4.0.0",
       "maxDuration": 30
     }
   }

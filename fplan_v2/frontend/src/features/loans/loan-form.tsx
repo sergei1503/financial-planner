@@ -38,11 +38,23 @@ const loanSchema = z.object({
   start_date: z.string().min(1),
   original_value: z.number().min(0),
   interest_rate_annual_pct: z.number().min(0),
-  duration_months: z.number().int().min(1),
+  end_date: z.string().min(1),
   collateral_asset_id: z.string().optional(),
 });
 
 type LoanFormValues = z.infer<typeof loanSchema>;
+
+function monthsBetween(start: string, end: string): number {
+  const s = new Date(start);
+  const e = new Date(end);
+  return (e.getFullYear() - s.getFullYear()) * 12 + (e.getMonth() - s.getMonth());
+}
+
+function addMonths(dateStr: string, months: number): string {
+  const d = new Date(dateStr);
+  d.setMonth(d.getMonth() + months);
+  return d.toISOString().slice(0, 10);
+}
 
 interface LoanFormProps {
   open: boolean;
@@ -83,6 +95,14 @@ export function LoanForm({ open, onOpenChange, loan }: LoanFormProps) {
   const { data: assets } = useAssets();
   const isEditing = !!loan;
 
+  function deriveEndDate(l?: LoanResponse): string {
+    if (l?.config_json?.end_date) return String(l.config_json.end_date);
+    if (l?.start_date && l?.duration_months) {
+      return addMonths(l.start_date.slice(0, 10), l.duration_months);
+    }
+    return '';
+  }
+
   const form = useForm<LoanFormValues>({
     resolver: zodResolver(loanSchema),
     defaultValues: {
@@ -91,7 +111,7 @@ export function LoanForm({ open, onOpenChange, loan }: LoanFormProps) {
       start_date: loan?.start_date?.slice(0, 10) ?? '',
       original_value: loan?.original_value ?? 0,
       interest_rate_annual_pct: loan?.interest_rate_annual_pct ?? 0,
-      duration_months: loan?.duration_months ?? 240,
+      end_date: deriveEndDate(loan),
       collateral_asset_id: loan?.collateral_asset_id?.toString() ?? NONE_VALUE,
     },
   });
@@ -104,7 +124,7 @@ export function LoanForm({ open, onOpenChange, loan }: LoanFormProps) {
         start_date: loan?.start_date?.slice(0, 10) ?? '',
         original_value: loan?.original_value ?? 0,
         interest_rate_annual_pct: loan?.interest_rate_annual_pct ?? 0,
-        duration_months: loan?.duration_months ?? 240,
+        end_date: deriveEndDate(loan),
         collateral_asset_id: loan?.collateral_asset_id?.toString() ?? NONE_VALUE,
       });
     }
@@ -116,6 +136,8 @@ export function LoanForm({ open, onOpenChange, loan }: LoanFormProps) {
         ? Number(values.collateral_asset_id)
         : null;
 
+    const durationMonths = monthsBetween(values.start_date, values.end_date);
+
     try {
       if (isEditing) {
         await updateMutation.mutateAsync({
@@ -123,6 +145,7 @@ export function LoanForm({ open, onOpenChange, loan }: LoanFormProps) {
           data: {
             name: values.name,
             interest_rate_annual_pct: values.interest_rate_annual_pct,
+            config_json: { ...loan.config_json, end_date: values.end_date },
           },
         });
       } else {
@@ -132,8 +155,9 @@ export function LoanForm({ open, onOpenChange, loan }: LoanFormProps) {
           start_date: values.start_date,
           original_value: values.original_value,
           interest_rate_annual_pct: values.interest_rate_annual_pct,
-          duration_months: values.duration_months,
+          duration_months: durationMonths,
           collateral_asset_id: collateralId,
+          config_json: { end_date: values.end_date },
         });
       }
       toast.success(t('messages.data_saved'));
@@ -253,18 +277,12 @@ export function LoanForm({ open, onOpenChange, loan }: LoanFormProps) {
 
             <FormField
               control={form.control}
-              name="duration_months"
+              name="end_date"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>{t('fields.duration_months')}</FormLabel>
+                  <FormLabel>{t('fields.end_date')}</FormLabel>
                   <FormControl>
-                    <NumberInput
-                      type="number"
-                      min={1}
-                      disabled={isEditing}
-                      value={field.value}
-                      onChange={field.onChange}
-                    />
+                    <Input type="date" {...field} />
                   </FormControl>
                   <FormMessage />
                 </FormItem>

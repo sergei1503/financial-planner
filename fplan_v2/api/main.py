@@ -27,7 +27,7 @@ async def lifespan(app: FastAPI):
     Application lifespan manager.
     Handles startup and shutdown events.
     """
-    is_serverless = os.getenv("VERCEL", "").lower() == "true"
+    is_serverless = bool(os.getenv("VERCEL"))
     if not is_serverless:
         # Startup: Initialize database connection (tables pre-created on Vercel)
         print("Initializing database connection...")
@@ -52,7 +52,7 @@ app = FastAPI(
 )
 
 # CORS configuration for React frontend
-_default_origins = "http://localhost:3000,http://localhost:3001,http://localhost:3041,http://localhost:5173,http://localhost:8501"
+_default_origins = "http://localhost:3000,http://localhost:3001,http://localhost:3002,http://localhost:3003,http://localhost:3041,http://localhost:5173,http://localhost:8501"
 _cors_origins = [o.strip() for o in os.getenv("CORS_ORIGINS", _default_origins).split(",")]
 
 app.add_middleware(

@@ -123,10 +123,15 @@ export function AssetForm({ open, onOpenChange, asset }: AssetFormProps) {
 
   async function onSubmit(values: AssetFormValues) {
     try {
-      const pensionConfig = values.asset_type === 'pension' ? {
+      const isPension = values.asset_type === 'pension';
+      const pensionConfig = isPension ? {
         conversion_date: values.conversion_date || undefined,
         conversion_coefficient: values.conversion_coefficient ?? 200,
       } : undefined;
+
+      // For pension, conversion_date replaces sell_date — they are mutually exclusive
+      const sellDate = isPension ? (values.conversion_date || null) : (values.sell_date || null);
+      const sellTax = isPension ? 0 : (values.sell_tax ?? 0);
 
       if (isEditing) {
         await updateMutation.mutateAsync({
@@ -135,8 +140,8 @@ export function AssetForm({ open, onOpenChange, asset }: AssetFormProps) {
             name: values.name,
             appreciation_rate_annual_pct: values.appreciation_rate_annual_pct,
             yearly_fee_pct: values.yearly_fee_pct,
-            sell_date: values.sell_date || null,
-            sell_tax: values.sell_tax,
+            sell_date: sellDate,
+            sell_tax: sellTax,
             ...(pensionConfig && { config_json: { ...asset?.config_json, ...pensionConfig } }),
           },
         });
@@ -149,8 +154,8 @@ export function AssetForm({ open, onOpenChange, asset }: AssetFormProps) {
           appreciation_rate_annual_pct: values.appreciation_rate_annual_pct,
           yearly_fee_pct: values.yearly_fee_pct,
           currency: values.currency,
-          sell_date: values.sell_date || null,
-          sell_tax: values.sell_tax,
+          sell_date: sellDate,
+          sell_tax: sellTax,
           ...(pensionConfig && { config_json: pensionConfig }),
         });
       }
@@ -359,58 +364,60 @@ export function AssetForm({ open, onOpenChange, asset }: AssetFormProps) {
               </>
             )}
 
-            <details className="rounded-md border p-3">
-              <summary className="cursor-pointer text-sm font-medium">
-                {t('actions.advanced')}
-              </summary>
-              <div className="mt-3 space-y-4">
-                <FormField
-                  control={form.control}
-                  name="sell_date"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>{t('fields.sell_date')}</FormLabel>
-                      <div className="flex gap-2 items-center">
-                        <FormControl>
-                          <Input type="date" {...field} />
-                        </FormControl>
-                        {field.value && (
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="sm"
-                            className="text-destructive shrink-0"
-                            onClick={() => form.setValue('sell_date', '')}
-                          >
-                            {t('actions.clear', 'Clear')}
-                          </Button>
-                        )}
-                      </div>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
+            {assetType !== 'pension' && (
+              <details className="rounded-md border p-3">
+                <summary className="cursor-pointer text-sm font-medium">
+                  {t('actions.advanced')}
+                </summary>
+                <div className="mt-3 space-y-4">
+                  <FormField
+                    control={form.control}
+                    name="sell_date"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>{t('fields.sell_date')}</FormLabel>
+                        <div className="flex gap-2 items-center">
+                          <FormControl>
+                            <Input type="date" {...field} />
+                          </FormControl>
+                          {field.value && (
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              className="text-destructive shrink-0"
+                              onClick={() => form.setValue('sell_date', '')}
+                            >
+                              {t('actions.clear', 'Clear')}
+                            </Button>
+                          )}
+                        </div>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
 
-                <FormField
-                  control={form.control}
-                  name="sell_tax"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>{t('fields.sell_tax')}</FormLabel>
-                      <FormControl>
-                        <NumberInput
-                          type="number"
-                          step="0.1"
-                          value={field.value}
-                          onChange={field.onChange}
-                        />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-              </div>
-            </details>
+                  <FormField
+                    control={form.control}
+                    name="sell_tax"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>{t('fields.sell_tax')}</FormLabel>
+                        <FormControl>
+                          <NumberInput
+                            type="number"
+                            step="0.1"
+                            value={field.value}
+                            onChange={field.onChange}
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </div>
+              </details>
+            )}
 
             <div className="flex justify-end gap-2 pt-2">
               <Button

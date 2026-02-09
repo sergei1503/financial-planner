@@ -90,7 +90,7 @@ export function LoanList({ loans }: LoanListProps) {
               <TableHead>{t('fields.type')}</TableHead>
               <TableHead>{t('fields.current_value')}</TableHead>
               <TableHead>{t('fields.interest_rate')}</TableHead>
-              <TableHead>{t('fields.duration_months')}</TableHead>
+              <TableHead>{t('fields.end_date')}</TableHead>
               <TableHead>{t('table.actions')}</TableHead>
             </TableRow>
           </TableHeader>
@@ -113,7 +113,14 @@ export function LoanList({ loans }: LoanListProps) {
                     {formatPercent(loan.interest_rate_annual_pct)}
                   </span>
                 </TableCell>
-                <TableCell>{loan.duration_months}</TableCell>
+                <TableCell>
+                  {(loan.config_json?.end_date as string) ??
+                    (() => {
+                      const d = new Date(loan.start_date);
+                      d.setMonth(d.getMonth() + loan.duration_months);
+                      return d.toISOString().slice(0, 10);
+                    })()}
+                </TableCell>
                 <TableCell>
                   <div className="flex gap-2">
                     <Button

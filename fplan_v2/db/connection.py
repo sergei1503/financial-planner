@@ -76,7 +76,7 @@ class DatabaseManager:
         config = DatabaseConfig()
 
         # Determine pooling strategy
-        is_serverless = os.getenv("VERCEL", "false").lower() == "true"
+        is_serverless = bool(os.getenv("VERCEL"))
 
         if is_serverless:
             # Serverless: Use NullPool to avoid connection buildup

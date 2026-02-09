@@ -1,12 +1,12 @@
 # FPlan v2 Dependencies
 
 # Database
-sqlalchemy>=2.0.0
+sqlalchemy>=2.0.0,<2.1.0
 psycopg2-binary>=2.9.0
 
-# Data processing
-pandas>=2.0.0
-numpy>=1.24.0
+# Data processing — pinned to slim versions for Vercel 250MB limit
+pandas>=2.2.0,<3.0.0
+numpy>=1.26.0,<2.0.0
 numpy-financial>=1.0.0
 
 # Date handling
