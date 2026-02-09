@@ -44,13 +44,16 @@ export function CashFlowChart({ data, breakdown }: CashFlowChartProps) {
   const { t } = useTranslation();
   const [hiddenSeries, setHiddenSeries] = useState<Set<string>>(new Set());
 
-  // Build per-source series from breakdown items
+  // Build per-source series from breakdown items, deduplicating by source_name
   const sources = useMemo(() => {
     if (!breakdown?.items?.length) return [];
-    // Filter out items that are all-zero
-    return breakdown.items.filter(item =>
-      item.time_series.some(p => Number(p.value) !== 0)
-    );
+    // Deduplicate items with the same source_name by keeping only the first
+    const seen = new Set<string>();
+    return breakdown.items.filter(item => {
+      if (seen.has(item.source_name)) return false;
+      seen.add(item.source_name);
+      return item.time_series.some(p => Number(p.value) !== 0);
+    });
   }, [breakdown]);
 
   const chartData = useMemo(() => {

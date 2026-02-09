@@ -423,19 +423,48 @@ def _project_standalone_revenue_streams(
             if cf_df.empty:
                 continue
 
-            # Build time series aligned to projection dates
-            series = []
-            for dt in all_dates:
-                ts = pd.Timestamp(dt)
-                matching = cf_df[cf_df["date"] == ts]
-                if not matching.empty:
-                    val = float(matching[CASH_FLOW].iloc[0])
-                else:
-                    val = 0.0
-                series.append(TimeSeriesDataPoint(
-                    date=dt.date() if isinstance(dt, pd.Timestamp) else dt,
-                    value=Decimal(str(val)),
-                ))
+            # Salary generates annual data points — spread into monthly values.
+            # Build a lookup from year → annual amount, then divide by 12 per month.
+            if isinstance(biz_stream, SalaryRevenueStream):
+                stream_start = pd.Timestamp(biz_stream.start_date).replace(day=1)
+                stream_end = pd.Timestamp(biz_stream.end_date).replace(day=1)
+
+                # Build year→amount lookup from the annual cash flow
+                annual_amounts = {}
+                for _, row in cf_df.iterrows():
+                    annual_amounts[row["date"].year] = float(row[CASH_FLOW])
+
+                series = []
+                for dt in all_dates:
+                    ts = dt if isinstance(dt, pd.Timestamp) else pd.Timestamp(dt)
+                    if ts < stream_start or ts > stream_end:
+                        val = 0.0
+                    else:
+                        # Find the applicable annual amount for this year
+                        annual = annual_amounts.get(ts.year)
+                        if annual is None:
+                            # Use the last known annual amount before this year
+                            applicable_years = [y for y in annual_amounts if y <= ts.year]
+                            annual = annual_amounts[max(applicable_years)] if applicable_years else 0.0
+                        val = annual / 12.0
+                    series.append(TimeSeriesDataPoint(
+                        date=dt.date() if isinstance(dt, pd.Timestamp) else dt,
+                        value=Decimal(str(round(val, 2))),
+                    ))
+            else:
+                # Rent and other streams: match directly to projection dates
+                series = []
+                for dt in all_dates:
+                    ts = pd.Timestamp(dt)
+                    matching = cf_df[cf_df["date"] == ts]
+                    if not matching.empty:
+                        val = float(matching[CASH_FLOW].iloc[0])
+                    else:
+                        val = 0.0
+                    series.append(TimeSeriesDataPoint(
+                        date=dt.date() if isinstance(dt, pd.Timestamp) else dt,
+                        value=Decimal(str(val)),
+                    ))
 
             items.append(CashFlowItem(
                 source_name=db_stream.name,
