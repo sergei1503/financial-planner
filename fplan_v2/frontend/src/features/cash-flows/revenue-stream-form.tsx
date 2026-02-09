@@ -32,6 +32,8 @@ import {
 } from '@/components/ui/select';
 import { Button } from '@/components/ui/button';
 
+const NONE_VALUE = '__none__';
+
 const revenueStreamSchema = z.object({
   stream_type: z.string().min(1),
   name: z.string().min(1),
@@ -331,8 +333,8 @@ export function RevenueStreamForm({ open, onOpenChange, revenueStream }: Revenue
                 <FormItem>
                   <FormLabel>{t('revenue.linked_asset')}</FormLabel>
                   <Select
-                    onValueChange={(value) => field.onChange(value ? parseInt(value) : null)}
-                    value={field.value?.toString() ?? ''}
+                    onValueChange={(value) => field.onChange(value === NONE_VALUE ? null : parseInt(value))}
+                    value={field.value?.toString() ?? NONE_VALUE}
                   >
                     <FormControl>
                       <SelectTrigger className="w-full">
@@ -340,7 +342,7 @@ export function RevenueStreamForm({ open, onOpenChange, revenueStream }: Revenue
                       </SelectTrigger>
                     </FormControl>
                     <SelectContent>
-                      <SelectItem value="">
+                      <SelectItem value={NONE_VALUE}>
                         {t('cashFlow.noLink')}
                       </SelectItem>
                       {assets?.map((asset) => (

@@ -449,6 +449,59 @@ def _project_standalone_revenue_streams(
     return items
 
 
+def _project_standalone_cash_flows(
+    db: Session, user_id: int, all_dates: list,
+) -> List[CashFlowItem]:
+    """
+    Project standalone cash flows (not attached to any asset).
+
+    These are general income/expense items like rent payments, utilities,
+    side income, etc. that the user added without linking to an asset.
+
+    Returns a list of CashFlowItem objects for the breakdown.
+    """
+    repo = CashFlowRepository(db)
+    all_cfs = repo.get_by_user(user_id)
+    standalone_cfs = [cf for cf in all_cfs if cf.target_asset_id is None]
+
+    items: List[CashFlowItem] = []
+    for cf in standalone_cfs:
+        cf_start = pd.Timestamp(cf.from_date).replace(day=1)
+        cf_end = pd.Timestamp(cf.to_date).replace(day=1)
+        amount = float(cf.amount)
+
+        series = []
+        for dt in all_dates:
+            ts = dt if isinstance(dt, pd.Timestamp) else pd.Timestamp(dt)
+            val = amount if cf_start <= ts <= cf_end else 0.0
+            series.append(TimeSeriesDataPoint(
+                date=dt.date() if isinstance(dt, pd.Timestamp) else dt,
+                value=Decimal(str(val)),
+            ))
+
+        if cf.flow_type == "deposit":
+            if cf.from_own_capital:
+                source_type = "expense"
+                category = "deposit"
+            else:
+                source_type = "income"
+                category = "external_deposit"
+        else:
+            source_type = "expense"
+            category = "withdrawal"
+
+        items.append(CashFlowItem(
+            source_name=cf.name,
+            source_type=source_type,
+            category=category,
+            time_series=series,
+            entity_id=None,
+            entity_type=None,
+        ))
+
+    return items
+
+
 def _build_cash_flow_breakdown(
     all_dates: list,
     loan_items: List[CashFlowItem],
@@ -1077,6 +1130,10 @@ def run_projection(
         # Standalone revenue streams (salary, rent not attached to assets)
         standalone_items = _project_standalone_revenue_streams(db, current_user.id, all_dates)
         breakdown_revenue_items.extend(standalone_items)
+
+        # Standalone cash flows (expenditures/incomes not attached to any asset)
+        standalone_cf_items = _project_standalone_cash_flows(db, current_user.id, all_dates)
+        breakdown_asset_cf_items.extend(standalone_cf_items)
 
         cash_flow_breakdown = _build_cash_flow_breakdown(
             all_dates, breakdown_loan_items, breakdown_asset_cf_items, breakdown_revenue_items,
