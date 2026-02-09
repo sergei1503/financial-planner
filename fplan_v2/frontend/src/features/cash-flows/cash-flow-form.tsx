@@ -35,6 +35,8 @@ import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 
+const NONE_VALUE = '__none__';
+
 const cashFlowSchema = z.object({
   flow_type: z.enum(['deposit', 'withdrawal']),
   name: z.string().min(1),
@@ -289,8 +291,8 @@ export function CashFlowForm({ open, onOpenChange, cashFlow, initialAssetId }: C
                 <FormItem>
                   <FormLabel>{t('revenue.linked_asset')}</FormLabel>
                   <Select
-                    onValueChange={(value) => field.onChange(value ? parseInt(value) : null)}
-                    value={field.value?.toString() ?? ''}
+                    onValueChange={(value) => field.onChange(value === NONE_VALUE ? null : parseInt(value))}
+                    value={field.value?.toString() ?? NONE_VALUE}
                   >
                     <FormControl>
                       <SelectTrigger className="w-full">
@@ -298,7 +300,7 @@ export function CashFlowForm({ open, onOpenChange, cashFlow, initialAssetId }: C
                       </SelectTrigger>
                     </FormControl>
                     <SelectContent>
-                      <SelectItem value="">
+                      <SelectItem value={NONE_VALUE}>
                         {t('cashFlow.noLink')}
                       </SelectItem>
                       {assets?.map((asset) => (

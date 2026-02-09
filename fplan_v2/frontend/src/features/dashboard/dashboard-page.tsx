@@ -11,6 +11,7 @@ import {
   Area,
   BarChart,
   Bar,
+  Cell,
   ResponsiveContainer,
   Tooltip,
 } from 'recharts';
@@ -165,7 +166,7 @@ function CashFlowTrend({ data }: { data: TimeSeriesDataPoint[] }) {
         />
         <Bar dataKey="value">
           {recent.map((entry, idx) => (
-            <rect key={idx} fill={entry.value >= 0 ? '#22c55e' : '#ef4444'} />
+            <Cell key={idx} fill={entry.value >= 0 ? '#22c55e' : '#ef4444'} />
           ))}
         </Bar>
       </BarChart>
