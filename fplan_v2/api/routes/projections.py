@@ -411,10 +411,53 @@ def _project_standalone_revenue_streams(
         if biz_stream is None:
             continue
 
-        # Salary and Rent streams support get_cash_flow()
+        # Salary: compute monthly values directly from DB fields (amount + period).
+        # SalaryRevenueStream.get_cash_flow() generates yearly points which don't
+        # align with the monthly projection grid, so we bypass it entirely.
+        if isinstance(biz_stream, SalaryRevenueStream):
+            amount = float(db_stream.amount)
+            period = db_stream.period or "monthly"
+            growth_rate = float(db_stream.growth_rate or 0) / 100.0
+
+            # Convert period amount to monthly
+            if period == "yearly":
+                monthly_amount = amount / 12.0
+            elif period == "quarterly":
+                monthly_amount = amount / 3.0
+            else:  # monthly
+                monthly_amount = amount
+
+            stream_start = pd.Timestamp(db_stream.start_date).replace(day=1)
+            stream_end = pd.Timestamp(db_stream.end_date).replace(day=1) if db_stream.end_date else pd.Timestamp("2070-01-01")
+
+            series = []
+            for dt in all_dates:
+                ts = dt if isinstance(dt, pd.Timestamp) else pd.Timestamp(dt)
+                if ts < stream_start or ts > stream_end:
+                    val = 0.0
+                else:
+                    # Apply annual growth compounding
+                    years_elapsed = (ts.year - stream_start.year) + (ts.month - stream_start.month) / 12.0
+                    val = monthly_amount * ((1 + growth_rate) ** years_elapsed)
+                series.append(TimeSeriesDataPoint(
+                    date=dt.date() if isinstance(dt, pd.Timestamp) else dt,
+                    value=Decimal(str(round(val, 2))),
+                ))
+
+            items.append(CashFlowItem(
+                source_name=db_stream.name,
+                source_type="income",
+                category=db_stream.stream_type,
+                time_series=series,
+                entity_id=None,
+                entity_type=None,
+            ))
+            continue
+
+        # Rent streams: use get_cash_flow() and match to projection dates
         # PensionRevenueStream.get_cash_flow() raises RuntimeError — skip standalone pension
         # DividendRevenueStream has no get_cash_flow — skip standalone dividend
-        if isinstance(biz_stream, (SalaryRevenueStream, RentRevenueStream)):
+        if isinstance(biz_stream, RentRevenueStream):
             try:
                 cf_df = biz_stream.get_cash_flow()
             except Exception:
@@ -423,55 +466,25 @@ def _project_standalone_revenue_streams(
             if cf_df.empty:
                 continue
 
-            # Salary generates annual data points — spread into monthly values.
-            # Build a lookup from year → annual amount, then divide by 12 per month.
-            if isinstance(biz_stream, SalaryRevenueStream):
-                stream_start = pd.Timestamp(biz_stream.start_date).replace(day=1)
-                stream_end = pd.Timestamp(biz_stream.end_date).replace(day=1)
-
-                # Build year→amount lookup from the annual cash flow
-                annual_amounts = {}
-                for _, row in cf_df.iterrows():
-                    annual_amounts[row["date"].year] = float(row[CASH_FLOW])
-
-                series = []
-                for dt in all_dates:
-                    ts = dt if isinstance(dt, pd.Timestamp) else pd.Timestamp(dt)
-                    if ts < stream_start or ts > stream_end:
-                        val = 0.0
-                    else:
-                        # Find the applicable annual amount for this year
-                        annual = annual_amounts.get(ts.year)
-                        if annual is None:
-                            # Use the last known annual amount before this year
-                            applicable_years = [y for y in annual_amounts if y <= ts.year]
-                            annual = annual_amounts[max(applicable_years)] if applicable_years else 0.0
-                        val = annual / 12.0
-                    series.append(TimeSeriesDataPoint(
-                        date=dt.date() if isinstance(dt, pd.Timestamp) else dt,
-                        value=Decimal(str(round(val, 2))),
-                    ))
-            else:
-                # Rent and other streams: match directly to projection dates
-                series = []
-                for dt in all_dates:
-                    ts = pd.Timestamp(dt)
-                    matching = cf_df[cf_df["date"] == ts]
-                    if not matching.empty:
-                        val = float(matching[CASH_FLOW].iloc[0])
-                    else:
-                        val = 0.0
-                    series.append(TimeSeriesDataPoint(
-                        date=dt.date() if isinstance(dt, pd.Timestamp) else dt,
-                        value=Decimal(str(val)),
-                    ))
+            series = []
+            for dt in all_dates:
+                ts = pd.Timestamp(dt)
+                matching = cf_df[cf_df["date"] == ts]
+                if not matching.empty:
+                    val = float(matching[CASH_FLOW].iloc[0])
+                else:
+                    val = 0.0
+                series.append(TimeSeriesDataPoint(
+                    date=dt.date() if isinstance(dt, pd.Timestamp) else dt,
+                    value=Decimal(str(val)),
+                ))
 
             items.append(CashFlowItem(
                 source_name=db_stream.name,
                 source_type="income",
                 category=db_stream.stream_type,
                 time_series=series,
-                entity_id=None,  # Standalone streams not linked to assets
+                entity_id=None,
                 entity_type=None,
             ))
 
