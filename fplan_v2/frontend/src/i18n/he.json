@@ -268,5 +268,11 @@
 
   "table.no_cash_flows": "אין הפקדות או משיכות עדיין.",
 
-  "messages.cash_flow_deleted": "התזרים נמחק בהצלחה"
+  "messages.cash_flow_deleted": "התזרים נמחק בהצלחה",
+
+  "demo.banner": "אתה צופה בתיק לדוגמה. השינויים לא יישמרו.",
+  "demo.sign_in_cta": "התחבר כדי לנהל תיק משלך",
+  "demo.sign_in": "התחבר",
+  "demo.reset": "אפס נתוני דוגמה",
+  "demo.reset_success": "נתוני הדוגמה אופסו בהצלחה"
 }

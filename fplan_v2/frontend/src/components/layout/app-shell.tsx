@@ -11,12 +11,14 @@ import {
 } from '@/components/ui/sheet';
 import { Header } from './header';
 import { Sidebar, NavContent } from './sidebar';
+import { DemoBanner } from '@/components/demo-banner';
 
 export function AppShell() {
   const [mobileOpen, setMobileOpen] = useState(false);
 
   return (
     <div className="flex h-screen flex-col">
+      <DemoBanner />
       <Header />
       <div className="flex flex-1 overflow-hidden">
         {/* Mobile menu button */}

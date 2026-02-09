@@ -1,5 +1,4 @@
 import { Routes, Route } from 'react-router-dom';
-import { SignedIn, SignedOut, RedirectToSignIn } from '@clerk/clerk-react';
 import { Toaster } from 'sonner';
 import { AppShell } from '@/components/layout/app-shell';
 import { DashboardPage } from '@/features/dashboard/dashboard-page';
@@ -10,27 +9,13 @@ import { ProjectionsPage } from '@/features/projections/projections-page';
 import { SignInPage } from '@/features/auth/sign-in-page';
 import { SignUpPage } from '@/features/auth/sign-up-page';
 
-const clerkEnabled = !!import.meta.env.VITE_CLERK_PUBLISHABLE_KEY;
-
-function ProtectedRoute({ children }: { children: React.ReactNode }) {
-  if (!clerkEnabled) return <>{children}</>;
-  return (
-    <>
-      <SignedIn>{children}</SignedIn>
-      <SignedOut>
-        <RedirectToSignIn />
-      </SignedOut>
-    </>
-  );
-}
-
 function App() {
   return (
     <>
       <Routes>
         <Route path="/sign-in/*" element={<SignInPage />} />
         <Route path="/sign-up/*" element={<SignUpPage />} />
-        <Route element={<ProtectedRoute><AppShell /></ProtectedRoute>}>
+        <Route element={<AppShell />}>
           <Route path="/" element={<DashboardPage />} />
           <Route path="/assets" element={<AssetsPage />} />
           <Route path="/loans" element={<LoansPage />} />

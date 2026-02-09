@@ -30,8 +30,10 @@ apiClient.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error.response?.status === 401) {
-      // Redirect to sign-in on auth failure (only if Clerk is enabled)
-      if (import.meta.env.VITE_CLERK_PUBLISHABLE_KEY) {
+      // Redirect to sign-in on auth failure only if Clerk is enabled
+      // and a token provider was set (i.e., user was previously signed in).
+      // In demo mode (no token provider), don't redirect.
+      if (import.meta.env.VITE_CLERK_PUBLISHABLE_KEY && tokenProvider) {
         window.location.href = '/sign-in';
       }
     }

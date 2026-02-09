@@ -1,9 +1,10 @@
 """
 Clerk JWT authentication for FastAPI.
 
-Supports two modes:
+Supports three modes:
 1. Clerk mode: Verifies JWT tokens from Clerk (when CLERK_SECRET_KEY is set)
-2. Single-user mode: Falls back to user_id=1 for self-hosted open-source usage
+2. Demo mode: When Clerk IS configured but no token provided, returns demo user
+3. Single-user mode: Falls back to user_id=1 for self-hosted open-source usage
 """
 
 import os
@@ -23,6 +24,9 @@ from fplan_v2.db.models import User
 CLERK_SECRET_KEY = os.getenv("CLERK_SECRET_KEY")
 CLERK_ISSUER = os.getenv("CLERK_ISSUER")  # e.g., https://clerk.your-domain.com
 CLERK_JWKS_URL = f"{CLERK_ISSUER}/.well-known/jwks.json" if CLERK_ISSUER else None
+
+# Demo user convention: clerk_id="demo"
+DEMO_CLERK_ID = "demo"
 
 # Security scheme - optional so it doesn't fail when no auth is configured
 security = HTTPBearer(auto_error=False)
@@ -128,8 +132,12 @@ async def get_current_user(
             )
         return user
 
-    # Clerk mode: verify JWT
+    # Clerk mode: verify JWT — or fall back to demo user if no token
     if not credentials:
+        # No token provided: return demo user instead of 401
+        demo_user = db.query(User).filter_by(clerk_id=DEMO_CLERK_ID).first()
+        if demo_user:
+            return demo_user
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Authentication required",
@@ -147,3 +155,8 @@ async def get_current_user(
     email = payload.get("email")
     user = _get_or_create_user(db, clerk_id, email)
     return user
+
+
+def is_demo_user(user: User) -> bool:
+    """Check if the given user is the demo user."""
+    return user.clerk_id == DEMO_CLERK_ID

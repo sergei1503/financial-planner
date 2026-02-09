@@ -18,7 +18,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from fplan_v2.db.connection import get_engine, init_db
-from fplan_v2.api.routes import assets, loans, revenue_streams, projections, historical_measurements, cash_flows
+from fplan_v2.api.routes import assets, loans, revenue_streams, projections, historical_measurements, cash_flows, demo
 
 
 @asynccontextmanager
@@ -96,6 +96,7 @@ app.include_router(revenue_streams.router, prefix="/api/revenue-streams", tags=[
 app.include_router(projections.router, prefix="/api/projections", tags=["Projections"])
 app.include_router(historical_measurements.router, prefix="/api/historical-measurements", tags=["Historical Measurements"])
 app.include_router(cash_flows.router, prefix="/api/cash-flows", tags=["Cash Flows"])
+app.include_router(demo.router, prefix="/api/demo", tags=["Demo"])
 
 
 # Root endpoint

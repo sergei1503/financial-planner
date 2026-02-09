@@ -1,13 +1,16 @@
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { Link } from 'react-router-dom';
 import { UserButton } from '@clerk/clerk-react';
-import { Moon, Sun } from 'lucide-react';
+import { Moon, Sun, LogIn } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { useDemoMode } from '@/contexts/demo-context';
 
 const clerkEnabled = !!import.meta.env.VITE_CLERK_PUBLISHABLE_KEY;
 
 export function Header() {
   const { t, i18n } = useTranslation();
+  const { isDemo } = useDemoMode();
   const [dark, setDark] = useState(() =>
     document.documentElement.classList.contains('dark')
   );
@@ -42,7 +45,15 @@ export function Header() {
         <Button variant="outline" size="sm" onClick={toggleLanguage}>
           {i18n.language === 'he' ? 'EN' : '\u05E2\u05D1'}
         </Button>
-        {clerkEnabled && <UserButton afterSignOutUrl="/sign-in" />}
+        {clerkEnabled && isDemo && (
+          <Button variant="default" size="sm" asChild>
+            <Link to="/sign-in">
+              <LogIn className="me-1 size-4" />
+              {t('demo.sign_in')}
+            </Link>
+          </Button>
+        )}
+        {clerkEnabled && !isDemo && <UserButton afterSignOutUrl="/" />}
       </div>
     </header>
   );

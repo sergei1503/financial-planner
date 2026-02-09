@@ -253,5 +253,11 @@
 
   "table.no_cash_flows": "No deposits or withdrawals yet.",
 
-  "messages.cash_flow_deleted": "Cash flow deleted successfully"
+  "messages.cash_flow_deleted": "Cash flow deleted successfully",
+
+  "demo.banner": "Viewing demo portfolio. Your changes won't be saved.",
+  "demo.sign_in_cta": "Sign in to manage your own portfolio",
+  "demo.sign_in": "Sign In",
+  "demo.reset": "Reset demo data",
+  "demo.reset_success": "Demo data has been reset successfully"
 }
