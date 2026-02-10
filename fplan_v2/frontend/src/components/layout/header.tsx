@@ -53,7 +53,7 @@ export function Header() {
             </Link>
           </Button>
         )}
-        {clerkEnabled && !isDemo && <UserButton afterSignOutUrl="/" />}
+        {clerkEnabled && !isDemo && <div dir="ltr"><UserButton afterSignOutUrl="/" /></div>}
       </div>
     </header>
   );

@@ -10,6 +10,7 @@ Provides REST API endpoints for:
 """
 
 import os
+import logging
 from contextlib import asynccontextmanager
 from typing import Dict, Any
 
@@ -17,8 +18,10 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+logger = logging.getLogger("fplan")
+
 from fplan_v2.db.connection import get_engine, init_db
-from fplan_v2.api.routes import assets, loans, revenue_streams, projections, historical_measurements, cash_flows, demo
+from fplan_v2.api.routes import assets, loans, revenue_streams, projections, historical_measurements, cash_flows, demo, scenarios
 
 
 @asynccontextmanager
@@ -68,6 +71,9 @@ app.add_middleware(
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
     """Handle all uncaught exceptions."""
+    import traceback
+    logger.error(f"Unhandled exception on {request.method} {request.url.path}: {type(exc).__name__}: {exc}")
+    logger.error(traceback.format_exc())
     return JSONResponse(
         status_code=500,
         content={
@@ -97,6 +103,7 @@ app.include_router(projections.router, prefix="/api/projections", tags=["Project
 app.include_router(historical_measurements.router, prefix="/api/historical-measurements", tags=["Historical Measurements"])
 app.include_router(cash_flows.router, prefix="/api/cash-flows", tags=["Cash Flows"])
 app.include_router(demo.router, prefix="/api/demo", tags=["Demo"])
+app.include_router(scenarios.router, prefix="/api/scenarios", tags=["Scenarios"])
 
 
 # Root endpoint

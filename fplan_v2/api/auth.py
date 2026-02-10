@@ -7,6 +7,7 @@ Supports three modes:
 3. Single-user mode: Falls back to user_id=1 for self-hosted open-source usage
 """
 
+import logging
 import os
 from typing import Optional
 
@@ -15,6 +16,8 @@ from jwt import PyJWKClient
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
+
+logger = logging.getLogger("fplan.auth")
 
 from fplan_v2.db.connection import get_db_session
 from fplan_v2.db.models import User
@@ -93,6 +96,11 @@ def _get_or_create_user(db: Session, clerk_id: str, email: Optional[str] = None)
     """
     user = db.query(User).filter_by(clerk_id=clerk_id).first()
     if user:
+        # Update email if we now have it and it was missing
+        if email and not user.email:
+            user.email = email
+            user.name = email
+            db.flush()
         return user
 
     # Auto-create user on first authentication
@@ -144,16 +152,24 @@ async def get_current_user(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    payload = _verify_clerk_token(credentials.credentials)
+    try:
+        payload = _verify_clerk_token(credentials.credentials)
+    except HTTPException:
+        logger.error("JWT verification failed for token (first 20 chars): %s...", credentials.credentials[:20])
+        raise
+
     clerk_id = payload.get("sub")
     if not clerk_id:
+        logger.error("JWT missing 'sub' claim. Payload keys: %s", list(payload.keys()))
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid token: missing subject",
         )
 
     email = payload.get("email")
+    logger.info("Auth: clerk_id=%s email=%s", clerk_id, email)
     user = _get_or_create_user(db, clerk_id, email)
+    logger.info("Auth: resolved to user id=%s name=%s", user.id, user.name)
     return user
 
 
