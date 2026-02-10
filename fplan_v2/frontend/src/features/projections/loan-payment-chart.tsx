@@ -13,6 +13,8 @@ import type { LoanProjection } from '@/api/types';
 
 interface LoanPaymentChartProps {
   loanProjections: LoanProjection[];
+  scenarioLoanProjections?: LoanProjection[];
+  scenarioName?: string;
 }
 
 const COLORS: Record<string, string> = {
@@ -43,7 +45,7 @@ function formatTooltipValue(value: number) {
   }).format(value);
 }
 
-export function LoanPaymentChart({ loanProjections }: LoanPaymentChartProps) {
+export function LoanPaymentChart({ loanProjections, scenarioLoanProjections, scenarioName }: LoanPaymentChartProps) {
   const { t } = useTranslation();
 
   if (loanProjections.length === 0) return null;
@@ -65,6 +67,22 @@ export function LoanPaymentChart({ loanProjections }: LoanPaymentChartProps) {
       ...values,
     }));
 
+  // Merge scenario payment data if available
+  const hasScenario = scenarioLoanProjections && scenarioLoanProjections.length > 0;
+  if (hasScenario) {
+    const dateIndex = new Map(chartData.map((d, i) => [d.date, i]));
+    for (const loan of scenarioLoanProjections) {
+      const key = `_s_${loan.loan_name}`;
+      for (const point of loan.payment_series) {
+        const formatted = formatChartDate(point.date);
+        const idx = dateIndex.get(formatted);
+        if (idx !== undefined) {
+          (chartData[idx] as Record<string, unknown>)[key] = point.value;
+        }
+      }
+    }
+  }
+
   return (
     <ResponsiveContainer width="100%" height={300}>
       <BarChart data={chartData} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
@@ -80,6 +98,16 @@ export function LoanPaymentChart({ loanProjections }: LoanPaymentChartProps) {
             name={`${loan.loan_name} (${t(`loan_types.${loan.loan_type}`)})`}
             fill={COLORS[loan.loan_type] ?? FALLBACK_COLORS[idx % FALLBACK_COLORS.length]}
             stackId="payments"
+          />
+        ))}
+        {hasScenario && scenarioLoanProjections!.map((loan, idx) => (
+          <Bar
+            key={`scenario-${loan.loan_id}`}
+            dataKey={`_s_${loan.loan_name}`}
+            name={`${scenarioName ?? t('scenarios.scenario')}: ${loan.loan_name}`}
+            fill={COLORS[loan.loan_type] ?? FALLBACK_COLORS[idx % FALLBACK_COLORS.length]}
+            fillOpacity={0.35}
+            stackId="scenario-payments"
           />
         ))}
       </BarChart>

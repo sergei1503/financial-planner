@@ -11,14 +11,14 @@ export default defineConfig({
     },
   },
   server: {
-    port: 3000,
+    port: 3034,
     proxy: {
       '/api': {
-        target: 'http://localhost:8000',
+        target: 'http://localhost:8034',
         changeOrigin: true,
       },
       '/health': {
-        target: 'http://localhost:8000',
+        target: 'http://localhost:8034',
         changeOrigin: true,
       },
     },

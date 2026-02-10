@@ -439,6 +439,77 @@ class HistoricalMeasurementResponse(BaseSchema):
 # ======================
 
 
+# ======================
+# Scenario Schemas
+# ======================
+
+
+class ScenarioActionType(str, Enum):
+    """Scenario action type enumeration."""
+
+    PARAM_CHANGE = "param_change"
+    NEW_ASSET = "new_asset"
+    NEW_LOAN = "new_loan"
+    REPAY_LOAN = "repay_loan"
+    TRANSFORM_ASSET = "transform_asset"
+    WITHDRAW_FROM_ASSET = "withdraw_from_asset"
+    DEPOSIT_TO_ASSET = "deposit_to_asset"
+    MARKET_CRASH = "market_crash"
+    ADD_REVENUE_STREAM = "add_revenue_stream"
+
+
+class ScenarioAction(BaseSchema):
+    """A single action within a scenario."""
+
+    type: ScenarioActionType
+    target_type: Optional[str] = Field(None, description="'asset', 'loan', or 'revenue_stream'")
+    target_id: Optional[int] = Field(None, description="ID of existing entity to modify")
+    field: Optional[str] = Field(None, description="Field name for PARAM_CHANGE")
+    value: Optional[Any] = Field(None, description="New value for PARAM_CHANGE")
+    changes: Optional[Dict[str, Any]] = Field(None, description="Multiple field changes for TRANSFORM_ASSET")
+    params: Optional[Dict[str, Any]] = Field(None, description="Parameters for NEW_ASSET, NEW_LOAN, ADD_REVENUE_STREAM")
+    crash_pct: Optional[float] = Field(None, description="Crash percentage for MARKET_CRASH")
+    crash_date: Optional[date] = Field(None, description="Crash date for MARKET_CRASH")
+    affected_asset_types: Optional[List[str]] = Field(None, description="Asset types affected by MARKET_CRASH (null = all)")
+    amount: Optional[float] = Field(None, description="Amount for WITHDRAW/DEPOSIT")
+    action_date: Optional[date] = Field(None, description="Date for WITHDRAW/DEPOSIT, REPAY_LOAN")
+
+
+class ScenarioCreate(BaseSchema):
+    """Schema for creating a new scenario."""
+
+    name: str = Field(..., min_length=1, max_length=255)
+    description: Optional[str] = None
+    actions: List[ScenarioAction]
+
+
+class ScenarioUpdate(BaseSchema):
+    """Schema for updating a scenario (all fields optional)."""
+
+    name: Optional[str] = Field(None, min_length=1, max_length=255)
+    description: Optional[str] = None
+    actions: Optional[List[ScenarioAction]] = None
+    is_active: Optional[bool] = None
+
+
+class ScenarioResponse(BaseSchema):
+    """Schema for scenario responses."""
+
+    id: int
+    user_id: int
+    name: str
+    description: Optional[str] = None
+    actions: List[ScenarioAction]
+    is_active: bool
+    created_at: datetime
+    updated_at: datetime
+
+
+# ======================
+# Error Response Schema
+# ======================
+
+
 class ErrorResponse(BaseSchema):
     """Standard error response schema."""
 

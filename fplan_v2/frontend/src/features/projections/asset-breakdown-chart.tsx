@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import {
   ComposedChart,
   Area,
+  Line,
   Scatter,
   XAxis,
   YAxis,
@@ -17,6 +18,8 @@ import { Button } from '@/components/ui/button';
 interface AssetBreakdownChartProps {
   assetProjections: AssetProjection[];
   historicalAssetProjections?: AssetProjection[];
+  scenarioAssetProjections?: AssetProjection[];
+  scenarioName?: string;
 }
 
 const COLORS = ['#3b82f6', '#22c55e', '#f59e0b', '#8b5cf6', '#ec4899', '#06b6d4', '#f97316', '#14b8a6'];
@@ -40,7 +43,7 @@ function formatTooltipValue(value: number) {
   }).format(value);
 }
 
-export function AssetBreakdownChart({ assetProjections }: AssetBreakdownChartProps) {
+export function AssetBreakdownChart({ assetProjections, scenarioAssetProjections, scenarioName }: AssetBreakdownChartProps) {
   const { t } = useTranslation();
   const [hiddenAssets, setHiddenAssets] = useState<Set<string>>(new Set());
 
@@ -131,6 +134,22 @@ export function AssetBreakdownChart({ assetProjections }: AssetBreakdownChartPro
     }
   }
 
+  // Merge scenario data if available
+  const hasScenario = scenarioAssetProjections && scenarioAssetProjections.length > 0;
+  if (hasScenario) {
+    const dateIndex = new Map(chartData.map((d, i) => [d.date, i]));
+    for (const asset of scenarioAssetProjections) {
+      const key = `_s_${asset.asset_name}`;
+      for (const point of asset.time_series) {
+        const formatted = formatChartDate(point.date);
+        const idx = dateIndex.get(formatted);
+        if (idx !== undefined) {
+          chartData[idx][key] = point.value;
+        }
+      }
+    }
+  }
+
   return (
     <div>
       {/* Custom clickable legend with toggle all controls */}
@@ -203,6 +222,21 @@ export function AssetBreakdownChart({ assetProjections }: AssetBreakdownChartPro
                 strokeWidth={2}
                 r={5}
                 shape="diamond"
+              />
+            );
+          })}
+          {hasScenario && scenarioAssetProjections!.map((asset, idx) => {
+            if (hiddenAssets.has(asset.asset_name)) return null;
+            return (
+              <Line
+                key={`scenario-${asset.asset_id}`}
+                type="monotone"
+                dataKey={`_s_${asset.asset_name}`}
+                name={`${scenarioName ?? t('scenarios.scenario')}: ${asset.asset_name}`}
+                stroke={COLORS[idx % COLORS.length]}
+                strokeWidth={2}
+                strokeDasharray="8 4"
+                dot={false}
               />
             );
           })}

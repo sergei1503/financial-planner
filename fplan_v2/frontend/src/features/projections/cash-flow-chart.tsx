@@ -17,6 +17,8 @@ interface CashFlowChartProps {
   data: TimeSeriesDataPoint[];
   breakdown?: CashFlowBreakdown | null;
   historicalData?: TimeSeriesDataPoint[];
+  scenarioBreakdown?: CashFlowBreakdown | null;
+  scenarioName?: string;
 }
 
 const COLORS = ['#22c55e', '#3b82f6', '#f97316', '#8b5cf6', '#ec4899', '#06b6d4', '#ef4444', '#14b8a6', '#eab308'];
@@ -40,7 +42,7 @@ function formatTooltipValue(value: number) {
   }).format(value);
 }
 
-export function CashFlowChart({ data, breakdown }: CashFlowChartProps) {
+export function CashFlowChart({ data, breakdown, scenarioBreakdown, scenarioName }: CashFlowChartProps) {
   const { t } = useTranslation();
   const [hiddenSeries, setHiddenSeries] = useState<Set<string>>(new Set());
 
@@ -91,6 +93,19 @@ export function CashFlowChart({ data, breakdown }: CashFlowChartProps) {
       __net__: Number(point.value),
     }));
   }, [data, breakdown, sources]);
+
+  // Merge scenario net cash flow into chart data
+  const hasScenario = scenarioBreakdown?.net_series && scenarioBreakdown.net_series.length > 0;
+  const chartDataWithScenario = useMemo(() => {
+    if (!hasScenario) return chartData;
+    const scenarioMap = new Map(
+      scenarioBreakdown!.net_series.map(p => [formatChartDate(p.date), Number(p.value)])
+    );
+    return chartData.map(row => ({
+      ...row,
+      __scenario_net__: scenarioMap.get(row.date as string),
+    }));
+  }, [chartData, hasScenario, scenarioBreakdown]);
 
   const toggleSeries = useCallback((name: string) => {
     setHiddenSeries(prev => {
@@ -165,7 +180,7 @@ export function CashFlowChart({ data, breakdown }: CashFlowChartProps) {
       </div>
 
       <ResponsiveContainer width="100%" height={350}>
-        <ComposedChart data={chartData} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
+        <ComposedChart data={chartDataWithScenario} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
           <CartesianGrid strokeDasharray="3 3" />
           <XAxis dataKey="date" />
           <YAxis tickFormatter={formatYAxis} />
@@ -191,6 +206,17 @@ export function CashFlowChart({ data, breakdown }: CashFlowChartProps) {
             dot={false}
             hide={hiddenSeries.has('__net__')}
           />
+          {hasScenario && (
+            <Line
+              type="monotone"
+              dataKey="__scenario_net__"
+              name={`${scenarioName ?? t('scenarios.scenario')}: ${netLabel}`}
+              stroke="#f59e0b"
+              strokeWidth={2}
+              strokeDasharray="8 4"
+              dot={false}
+            />
+          )}
         </ComposedChart>
       </ResponsiveContainer>
     </div>

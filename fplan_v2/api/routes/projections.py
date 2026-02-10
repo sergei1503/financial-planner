@@ -739,6 +739,450 @@ def _store_cached_projection(db: Session, user_id: int, cache_key: str, response
     db.flush()
 
 
+def compute_projection(
+    assets: list,
+    loans: list,
+    db_assets: list,
+    db_loans: list,
+    measurements: list,
+    start_date: date,
+    end_date: date,
+    months_to_project: int,
+    db: Session,
+    user_id: int,
+    is_historical: bool = False,
+    historical_as_of_date: date = None,
+) -> ProjectionResponse:
+    """
+    Core projection pipeline: takes business objects and runs the full projection.
+
+    This is the reusable computation extracted from run_projection().
+    Both the normal projection endpoint and the scenario endpoint call this.
+
+    Args:
+        assets: List of business Asset objects
+        loans: List of business Loan objects
+        db_assets: List of ORM Asset objects (or mock objects with same attributes)
+        db_loans: List of ORM Loan objects (or mock objects with same attributes)
+        measurements: List of historical measurement records
+        start_date: Projection start date
+        end_date: Projection end date
+        months_to_project: Number of months to project
+        db: Database session
+        user_id: User ID for loading standalone revenue streams / cash flows
+        is_historical: Whether this is a historical projection
+        historical_as_of_date: The as_of_date used for historical projection
+
+    Returns:
+        ProjectionResponse with all computed time series
+    """
+    # Run projections for each asset
+    asset_projections_list: List[AssetProjection] = []
+    all_asset_dfs: List[pd.DataFrame] = []
+
+    for asset in assets:
+        df = asset.get_projection(months_to_project=months_to_project)
+        all_asset_dfs.append(df)
+
+    # Apply sell→cash conversions and deposit cash flow impact
+    _apply_cash_conversions(assets, db_assets, all_asset_dfs, start_date)
+
+    # Run projections for each loan
+    loan_projections_list: List[LoanProjection] = []
+    all_loan_dfs: List[pd.DataFrame] = []
+
+    for loan in loans:
+        df = loan.get_projection()
+        all_loan_dfs.append(df)
+
+    # Apply historical measurement shifts to projections
+    asset_markers_map, loan_markers_map = _apply_measurement_shifts(
+        all_asset_dfs, db_assets, all_loan_dfs, db_loans, measurements,
+    )
+
+    # Rebuild asset time series after cash conversion and measurement adjustments
+    asset_projections_list = []
+    for i, asset_df in enumerate(all_asset_dfs):
+        time_series = [
+            TimeSeriesDataPoint(
+                date=row["date"].date(),
+                value=Decimal(str(row[VALUE]))
+            )
+            for _, row in asset_df.iterrows()
+        ]
+        asset_projections_list.append(AssetProjection(
+            asset_id=db_assets[i].id,
+            asset_name=db_assets[i].name,
+            asset_type=db_assets[i].asset_type,
+            time_series=time_series,
+            measurements=asset_markers_map.get(i, []),
+        ))
+
+    # Build loan projection response objects
+    for i, loan_df in enumerate(all_loan_dfs):
+        balance_series = [
+            TimeSeriesDataPoint(
+                date=row["date"].date(),
+                value=Decimal(str(abs(row[VALUE])))
+            )
+            for _, row in loan_df.iterrows()
+        ]
+
+        payment_series = [
+            TimeSeriesDataPoint(
+                date=row["date"].date(),
+                value=Decimal(str(abs(row[CASH_FLOW])))
+            )
+            for _, row in loan_df.iterrows()
+        ]
+
+        loan_projections_list.append(LoanProjection(
+            loan_id=db_loans[i].id,
+            loan_name=db_loans[i].name,
+            loan_type=db_loans[i].loan_type,
+            balance_series=balance_series,
+            payment_series=payment_series,
+            measurements=loan_markers_map.get(i, []),
+        ))
+
+    # Build all measurement markers for the response
+    all_markers: List[MeasurementMarker] = []
+    for markers in asset_markers_map.values():
+        all_markers.extend(markers)
+    for markers in loan_markers_map.values():
+        all_markers.extend(markers)
+
+    # Aggregate time series data
+    # Combine all asset projections
+    if all_asset_dfs:
+        combined_assets = pd.concat(all_asset_dfs, ignore_index=True)
+        total_assets_by_date = combined_assets.groupby("date")[VALUE].sum().reset_index()
+    else:
+        # Create empty DataFrame with proper structure
+        total_assets_by_date = pd.DataFrame(columns=["date", VALUE])
+
+    # Combine all loan projections
+    if all_loan_dfs:
+        combined_loans = pd.concat(all_loan_dfs, ignore_index=True)
+        total_liabilities_by_date = combined_loans.groupby("date")[VALUE].sum().reset_index()
+        loan_payments_by_date = combined_loans.groupby("date")[CASH_FLOW].sum().reset_index()
+    else:
+        total_liabilities_by_date = pd.DataFrame(columns=["date", VALUE])
+        loan_payments_by_date = pd.DataFrame(columns=["date", CASH_FLOW])
+
+    # Aggregate asset cash flows (deposits/withdrawals impacting monthly flow)
+    asset_cf_dfs = [df[["date", CASH_FLOW]] for df in all_asset_dfs if CASH_FLOW in df.columns and not df.empty]
+    if asset_cf_dfs:
+        combined_asset_cf = pd.concat(asset_cf_dfs, ignore_index=True)
+        asset_cf_by_date = combined_asset_cf.groupby("date")[CASH_FLOW].sum().reset_index()
+    else:
+        asset_cf_by_date = pd.DataFrame(columns=["date", CASH_FLOW])
+
+    # Merge loan payments + asset cash flows into total monthly cash flow
+    if not loan_payments_by_date.empty and not asset_cf_by_date.empty:
+        total_payments_by_date = loan_payments_by_date.merge(
+            asset_cf_by_date, on="date", how="outer", suffixes=("_loan", "_asset")
+        )
+        total_payments_by_date = total_payments_by_date.fillna(0)
+        total_payments_by_date[CASH_FLOW] = (
+            total_payments_by_date.get(f"{CASH_FLOW}_loan", 0) +
+            total_payments_by_date.get(f"{CASH_FLOW}_asset", 0)
+        )
+    elif not loan_payments_by_date.empty:
+        total_payments_by_date = loan_payments_by_date
+    elif not asset_cf_by_date.empty:
+        total_payments_by_date = asset_cf_by_date
+    else:
+        total_payments_by_date = pd.DataFrame(columns=["date", CASH_FLOW])
+
+    # Create unified date range
+    all_dates = set()
+    if not total_assets_by_date.empty:
+        all_dates.update(total_assets_by_date["date"].tolist())
+    if not total_liabilities_by_date.empty:
+        all_dates.update(total_liabilities_by_date["date"].tolist())
+
+    if not all_dates:
+        # Generate date range if no projections available
+        all_dates = [start_date + relativedelta(months=i) for i in range(months_to_project)]
+
+    all_dates = sorted(list(all_dates))
+
+    # Build response time series
+    net_worth_series: List[TimeSeriesDataPoint] = []
+    total_assets_series: List[TimeSeriesDataPoint] = []
+    total_liabilities_series: List[TimeSeriesDataPoint] = []
+    cash_flow_series: List[TimeSeriesDataPoint] = []
+
+    for dt in all_dates:
+        # Get asset value for this date
+        if not total_assets_by_date.empty:
+            asset_row = total_assets_by_date[total_assets_by_date["date"] == dt]
+            asset_value = float(asset_row[VALUE].iloc[0]) if not asset_row.empty else 0.0
+        else:
+            asset_value = 0.0
+
+        # Get liability value for this date
+        if not total_liabilities_by_date.empty:
+            liability_row = total_liabilities_by_date[total_liabilities_by_date["date"] == dt]
+            liability_value = abs(float(liability_row[VALUE].iloc[0])) if not liability_row.empty else 0.0
+        else:
+            liability_value = 0.0
+
+        # Get cash flow for this date
+        if not total_payments_by_date.empty:
+            payment_row = total_payments_by_date[total_payments_by_date["date"] == dt]
+            payment_value = abs(float(payment_row[CASH_FLOW].iloc[0])) if not payment_row.empty else 0.0
+        else:
+            payment_value = 0.0
+
+        # Calculate net worth
+        net_worth = asset_value - liability_value
+
+        # Add to series
+        net_worth_series.append(TimeSeriesDataPoint(
+            date=dt.date() if isinstance(dt, pd.Timestamp) else dt,
+            value=Decimal(str(net_worth))
+        ))
+
+        total_assets_series.append(TimeSeriesDataPoint(
+            date=dt.date() if isinstance(dt, pd.Timestamp) else dt,
+            value=Decimal(str(asset_value))
+        ))
+
+        total_liabilities_series.append(TimeSeriesDataPoint(
+            date=dt.date() if isinstance(dt, pd.Timestamp) else dt,
+            value=Decimal(str(liability_value))
+        ))
+
+        cash_flow_series.append(TimeSeriesDataPoint(
+            date=dt.date() if isinstance(dt, pd.Timestamp) else dt,
+            value=Decimal(str(-payment_value))  # Negative because it's an outflow
+        ))
+
+    # Build cash flow breakdown with per-source attribution
+    breakdown_loan_items: List[CashFlowItem] = []
+    breakdown_asset_cf_items: List[CashFlowItem] = []
+    breakdown_revenue_items: List[CashFlowItem] = []
+
+    # Loan payment items (expenses)
+    for i, loan_df in enumerate(all_loan_dfs):
+        if loan_df.empty:
+            continue
+        series = []
+        for dt in all_dates:
+            matching = loan_df[loan_df["date"] == dt]
+            val = abs(float(matching[CASH_FLOW].iloc[0])) if not matching.empty else 0.0
+            series.append(TimeSeriesDataPoint(
+                date=dt.date() if isinstance(dt, pd.Timestamp) else dt,
+                value=Decimal(str(val)),
+            ))
+        breakdown_loan_items.append(CashFlowItem(
+            source_name=db_loans[i].name,
+            source_type="expense",
+            category="loan_payment",
+            time_series=series,
+            entity_id=db_loans[i].id,
+            entity_type="loan",
+        ))
+
+    # Asset deposit/withdrawal items - split by from_own_capital
+    cash_flow_repo = CashFlowRepository(db)
+    for i, asset_df in enumerate(all_asset_dfs):
+        if asset_df.empty or CASH_FLOW not in asset_df.columns:
+            continue
+        has_nonzero = asset_df[CASH_FLOW].abs().sum() > 0
+        if not has_nonzero:
+            continue
+
+        # Get cash flow records for this asset to check from_own_capital flag
+        asset_cash_flows = cash_flow_repo.get_by_asset(
+            user_id=user_id,
+            asset_id=db_assets[i].id
+        )
+
+        # Group cash flows by from_own_capital flag
+        cash_flows_by_flag = {}
+        for cf in asset_cash_flows:
+            flag = cf.from_own_capital
+            if flag not in cash_flows_by_flag:
+                cash_flows_by_flag[flag] = []
+            cash_flows_by_flag[flag].append(cf)
+
+        # Create breakdown items only for own capital deposits (employer deposits don't affect cash flow)
+        for from_own_capital, cfs in cash_flows_by_flag.items():
+            if not from_own_capital:
+                continue  # Skip employer deposits - they don't pass through your bank account
+            # Build time series for this classification
+            series = []
+            for dt in all_dates:
+                # Sum up all cash flows for this date that match this flag
+                val = 0.0
+                for cf in cfs:
+                    # Check if this date falls within the cash flow period
+                    cf_start = pd.Timestamp(cf.from_date).replace(day=1)
+                    cf_end = pd.Timestamp(cf.to_date).replace(day=1)
+                    if cf_start <= dt <= cf_end:
+                        # Get value from asset_df for this date
+                        matching = asset_df[asset_df["date"] == dt]
+                        if not matching.empty:
+                            val += float(matching[CASH_FLOW].iloc[0])
+
+                series.append(TimeSeriesDataPoint(
+                    date=dt.date() if isinstance(dt, pd.Timestamp) else dt,
+                    value=Decimal(str(abs(val))),
+                ))
+
+            # Classify by from_own_capital flag
+            if from_own_capital:
+                # from_own_capital=True → category="deposit", source_type="expense"
+                category = "deposit"
+                source_type = "expense"
+                source_name = f"{db_assets[i].name} - Own Capital"
+            else:
+                # from_own_capital=False → category="external_deposit", source_type="income"
+                category = "external_deposit"
+                source_type = "income"
+                source_name = f"{db_assets[i].name} - External Deposit"
+
+            breakdown_asset_cf_items.append(CashFlowItem(
+                source_name=source_name,
+                source_type=source_type,
+                category=category,
+                time_series=series,
+                entity_id=db_assets[i].id,
+                entity_type="asset",
+            ))
+
+    # Revenue stream items (income) — from assets with attached streams
+    for i, asset in enumerate(assets):
+        if not hasattr(asset, 'revenue_stream') or asset.revenue_stream is None:
+            continue
+        stream = asset.revenue_stream
+        # Salary and Rent streams support get_cash_flow()
+        if isinstance(stream, (SalaryRevenueStream, RentRevenueStream)):
+            try:
+                cf_df = stream.get_cash_flow()
+            except Exception:
+                continue
+            if cf_df.empty:
+                continue
+            series = []
+            for dt in all_dates:
+                ts = pd.Timestamp(dt)
+                matching = cf_df[cf_df["date"] == ts]
+                val = float(matching[CASH_FLOW].iloc[0]) if not matching.empty else 0.0
+                series.append(TimeSeriesDataPoint(
+                    date=dt.date() if isinstance(dt, pd.Timestamp) else dt,
+                    value=Decimal(str(val)),
+                ))
+            category = "rent" if isinstance(stream, RentRevenueStream) else "salary"
+            breakdown_revenue_items.append(CashFlowItem(
+                source_name=f"{db_assets[i].name} - {category.title()}",
+                source_type="income",
+                category=category,
+                time_series=series,
+                entity_id=db_assets[i].id,
+                entity_type="asset",
+            ))
+
+    # Pension income items — extract from PensionAsset CASH_FLOW
+    for i, asset in enumerate(assets):
+        if not isinstance(asset, PensionAsset):
+            continue
+        asset_df = all_asset_dfs[i]
+        if asset_df.empty or CASH_FLOW not in asset_df.columns:
+            continue
+        series = []
+        for dt in all_dates:
+            ts = pd.Timestamp(dt)
+            matching = asset_df[asset_df["date"] == ts]
+            val = float(matching[CASH_FLOW].iloc[0]) if not matching.empty else 0.0
+            series.append(TimeSeriesDataPoint(
+                date=dt.date() if isinstance(dt, pd.Timestamp) else dt,
+                value=Decimal(str(val)),
+            ))
+        breakdown_revenue_items.append(CashFlowItem(
+            source_name=f"{db_assets[i].name} - Pension",
+            source_type="income",
+            category="pension",
+            time_series=series,
+            entity_id=db_assets[i].id,
+            entity_type="asset",
+        ))
+
+    # Standalone revenue streams (salary, rent not attached to assets)
+    standalone_items = _project_standalone_revenue_streams(db, user_id, all_dates)
+    breakdown_revenue_items.extend(standalone_items)
+
+    # Standalone cash flows (expenditures/incomes not attached to any asset)
+    standalone_cf_items = _project_standalone_cash_flows(db, user_id, all_dates)
+    breakdown_asset_cf_items.extend(standalone_cf_items)
+
+    cash_flow_breakdown = _build_cash_flow_breakdown(
+        all_dates, breakdown_loan_items, breakdown_asset_cf_items, breakdown_revenue_items,
+    )
+
+    # Update net cash flow series to include revenue income
+    if cash_flow_breakdown.net_series:
+        cash_flow_series = cash_flow_breakdown.net_series
+
+    # Build accumulated cash asset from cumulative net cash flow
+    # This represents the running sum of surplus (or deficit) cash over time
+    if cash_flow_breakdown.net_series:
+        accumulated_cash_series: List[TimeSeriesDataPoint] = []
+        cumulative = 0.0
+        for point in cash_flow_breakdown.net_series:
+            cumulative += float(point.value)
+            # Allow negative values to show when strategy leads to bank overdraft
+            accumulated_cash_series.append(TimeSeriesDataPoint(
+                date=point.date,
+                value=Decimal(str(round(cumulative, 2))),
+            ))
+
+        # Add as a virtual asset projection (use id=0 for virtual)
+        asset_projections_list.append(AssetProjection(
+            asset_id=0,
+            asset_name="מזומנים מצטברים",
+            asset_type="cash",
+            time_series=accumulated_cash_series,
+        ))
+
+        # Update total_assets_series and net_worth_series to include accumulated cash
+        for i, point in enumerate(accumulated_cash_series):
+            if i < len(total_assets_series):
+                old_asset_val = float(total_assets_series[i].value)
+                new_asset_val = old_asset_val + float(point.value)
+                total_assets_series[i] = TimeSeriesDataPoint(
+                    date=total_assets_series[i].date,
+                    value=Decimal(str(round(new_asset_val, 2))),
+                )
+            if i < len(net_worth_series):
+                old_nw_val = float(net_worth_series[i].value)
+                new_nw_val = old_nw_val + float(point.value)
+                net_worth_series[i] = TimeSeriesDataPoint(
+                    date=net_worth_series[i].date,
+                    value=Decimal(str(round(new_nw_val, 2))),
+                )
+
+    return ProjectionResponse(
+        user_id=user_id,
+        start_date=start_date,
+        end_date=end_date,
+        net_worth_series=net_worth_series,
+        total_assets_series=total_assets_series,
+        total_liabilities_series=total_liabilities_series,
+        monthly_cash_flow_series=cash_flow_series,
+        cash_flow_breakdown=cash_flow_breakdown,
+        asset_projections=asset_projections_list,
+        loan_projections=loan_projections_list,
+        measurement_markers=all_markers,
+        is_historical=is_historical,
+        historical_as_of_date=historical_as_of_date,
+        computed_at=datetime.now(),
+    )
+
+
 @router.post("/run", response_model=ProjectionResponse)
 def run_projection(
     request: ProjectionRequest,
@@ -834,411 +1278,19 @@ def run_projection(
     # Note: all_measurements already loaded above with proper filtering for historical mode
 
     try:
-        # Run projections for each asset
-        asset_projections_list: List[AssetProjection] = []
-        all_asset_dfs: List[pd.DataFrame] = []
-
-        for asset in assets:
-            df = asset.get_projection(months_to_project=months_to_project)
-            all_asset_dfs.append(df)
-
-        # Apply sell→cash conversions and deposit cash flow impact
-        _apply_cash_conversions(assets, db_assets, all_asset_dfs, start_date)
-
-        # Run projections for each loan
-        loan_projections_list: List[LoanProjection] = []
-        all_loan_dfs: List[pd.DataFrame] = []
-
-        for loan in loans:
-            df = loan.get_projection()
-            all_loan_dfs.append(df)
-
-        # Apply historical measurement shifts to projections
-        asset_markers_map, loan_markers_map = _apply_measurement_shifts(
-            all_asset_dfs, db_assets, all_loan_dfs, db_loans, all_measurements,
-        )
-
-        # Rebuild asset time series after cash conversion and measurement adjustments
-        asset_projections_list = []
-        for i, asset_df in enumerate(all_asset_dfs):
-            time_series = [
-                TimeSeriesDataPoint(
-                    date=row["date"].date(),
-                    value=Decimal(str(row[VALUE]))
-                )
-                for _, row in asset_df.iterrows()
-            ]
-            asset_projections_list.append(AssetProjection(
-                asset_id=db_assets[i].id,
-                asset_name=db_assets[i].name,
-                asset_type=db_assets[i].asset_type,
-                time_series=time_series,
-                measurements=asset_markers_map.get(i, []),
-            ))
-
-        # Build loan projection response objects
-        for i, loan_df in enumerate(all_loan_dfs):
-            balance_series = [
-                TimeSeriesDataPoint(
-                    date=row["date"].date(),
-                    value=Decimal(str(abs(row[VALUE])))
-                )
-                for _, row in loan_df.iterrows()
-            ]
-
-            payment_series = [
-                TimeSeriesDataPoint(
-                    date=row["date"].date(),
-                    value=Decimal(str(abs(row[CASH_FLOW])))
-                )
-                for _, row in loan_df.iterrows()
-            ]
-
-            loan_projections_list.append(LoanProjection(
-                loan_id=db_loans[i].id,
-                loan_name=db_loans[i].name,
-                loan_type=db_loans[i].loan_type,
-                balance_series=balance_series,
-                payment_series=payment_series,
-                measurements=loan_markers_map.get(i, []),
-            ))
-
-        # Build all measurement markers for the response
-        all_markers: List[MeasurementMarker] = []
-        for markers in asset_markers_map.values():
-            all_markers.extend(markers)
-        for markers in loan_markers_map.values():
-            all_markers.extend(markers)
-
-        # Aggregate time series data
-        # Combine all asset projections
-        if all_asset_dfs:
-            combined_assets = pd.concat(all_asset_dfs, ignore_index=True)
-            total_assets_by_date = combined_assets.groupby("date")[VALUE].sum().reset_index()
-        else:
-            # Create empty DataFrame with proper structure
-            total_assets_by_date = pd.DataFrame(columns=["date", VALUE])
-
-        # Combine all loan projections
-        if all_loan_dfs:
-            combined_loans = pd.concat(all_loan_dfs, ignore_index=True)
-            total_liabilities_by_date = combined_loans.groupby("date")[VALUE].sum().reset_index()
-            loan_payments_by_date = combined_loans.groupby("date")[CASH_FLOW].sum().reset_index()
-        else:
-            total_liabilities_by_date = pd.DataFrame(columns=["date", VALUE])
-            loan_payments_by_date = pd.DataFrame(columns=["date", CASH_FLOW])
-
-        # Aggregate asset cash flows (deposits/withdrawals impacting monthly flow)
-        asset_cf_dfs = [df[["date", CASH_FLOW]] for df in all_asset_dfs if CASH_FLOW in df.columns and not df.empty]
-        if asset_cf_dfs:
-            combined_asset_cf = pd.concat(asset_cf_dfs, ignore_index=True)
-            asset_cf_by_date = combined_asset_cf.groupby("date")[CASH_FLOW].sum().reset_index()
-        else:
-            asset_cf_by_date = pd.DataFrame(columns=["date", CASH_FLOW])
-
-        # Merge loan payments + asset cash flows into total monthly cash flow
-        if not loan_payments_by_date.empty and not asset_cf_by_date.empty:
-            total_payments_by_date = loan_payments_by_date.merge(
-                asset_cf_by_date, on="date", how="outer", suffixes=("_loan", "_asset")
-            )
-            total_payments_by_date = total_payments_by_date.fillna(0)
-            total_payments_by_date[CASH_FLOW] = (
-                total_payments_by_date.get(f"{CASH_FLOW}_loan", 0) +
-                total_payments_by_date.get(f"{CASH_FLOW}_asset", 0)
-            )
-        elif not loan_payments_by_date.empty:
-            total_payments_by_date = loan_payments_by_date
-        elif not asset_cf_by_date.empty:
-            total_payments_by_date = asset_cf_by_date
-        else:
-            total_payments_by_date = pd.DataFrame(columns=["date", CASH_FLOW])
-
-        # Create unified date range
-        all_dates = set()
-        if not total_assets_by_date.empty:
-            all_dates.update(total_assets_by_date["date"].tolist())
-        if not total_liabilities_by_date.empty:
-            all_dates.update(total_liabilities_by_date["date"].tolist())
-
-        if not all_dates:
-            # Generate date range if no projections available
-            all_dates = [start_date + relativedelta(months=i) for i in range(months_to_project)]
-
-        all_dates = sorted(list(all_dates))
-
-        # Build response time series
-        net_worth_series: List[TimeSeriesDataPoint] = []
-        total_assets_series: List[TimeSeriesDataPoint] = []
-        total_liabilities_series: List[TimeSeriesDataPoint] = []
-        cash_flow_series: List[TimeSeriesDataPoint] = []
-
-        for dt in all_dates:
-            # Get asset value for this date
-            if not total_assets_by_date.empty:
-                asset_row = total_assets_by_date[total_assets_by_date["date"] == dt]
-                asset_value = float(asset_row[VALUE].iloc[0]) if not asset_row.empty else 0.0
-            else:
-                asset_value = 0.0
-
-            # Get liability value for this date
-            if not total_liabilities_by_date.empty:
-                liability_row = total_liabilities_by_date[total_liabilities_by_date["date"] == dt]
-                liability_value = abs(float(liability_row[VALUE].iloc[0])) if not liability_row.empty else 0.0
-            else:
-                liability_value = 0.0
-
-            # Get cash flow for this date
-            if not total_payments_by_date.empty:
-                payment_row = total_payments_by_date[total_payments_by_date["date"] == dt]
-                payment_value = abs(float(payment_row[CASH_FLOW].iloc[0])) if not payment_row.empty else 0.0
-            else:
-                payment_value = 0.0
-
-            # Calculate net worth
-            net_worth = asset_value - liability_value
-
-            # Add to series
-            net_worth_series.append(TimeSeriesDataPoint(
-                date=dt.date() if isinstance(dt, pd.Timestamp) else dt,
-                value=Decimal(str(net_worth))
-            ))
-
-            total_assets_series.append(TimeSeriesDataPoint(
-                date=dt.date() if isinstance(dt, pd.Timestamp) else dt,
-                value=Decimal(str(asset_value))
-            ))
-
-            total_liabilities_series.append(TimeSeriesDataPoint(
-                date=dt.date() if isinstance(dt, pd.Timestamp) else dt,
-                value=Decimal(str(liability_value))
-            ))
-
-            cash_flow_series.append(TimeSeriesDataPoint(
-                date=dt.date() if isinstance(dt, pd.Timestamp) else dt,
-                value=Decimal(str(-payment_value))  # Negative because it's an outflow
-            ))
-
-        # Build cash flow breakdown with per-source attribution
-        breakdown_loan_items: List[CashFlowItem] = []
-        breakdown_asset_cf_items: List[CashFlowItem] = []
-        breakdown_revenue_items: List[CashFlowItem] = []
-
-        # Loan payment items (expenses)
-        for i, loan_df in enumerate(all_loan_dfs):
-            if loan_df.empty:
-                continue
-            series = []
-            for dt in all_dates:
-                matching = loan_df[loan_df["date"] == dt]
-                val = abs(float(matching[CASH_FLOW].iloc[0])) if not matching.empty else 0.0
-                series.append(TimeSeriesDataPoint(
-                    date=dt.date() if isinstance(dt, pd.Timestamp) else dt,
-                    value=Decimal(str(val)),
-                ))
-            breakdown_loan_items.append(CashFlowItem(
-                source_name=db_loans[i].name,
-                source_type="expense",
-                category="loan_payment",
-                time_series=series,
-                entity_id=db_loans[i].id,
-                entity_type="loan",
-            ))
-
-        # Asset deposit/withdrawal items - split by from_own_capital
-        cash_flow_repo = CashFlowRepository(db)
-        for i, asset_df in enumerate(all_asset_dfs):
-            if asset_df.empty or CASH_FLOW not in asset_df.columns:
-                continue
-            has_nonzero = asset_df[CASH_FLOW].abs().sum() > 0
-            if not has_nonzero:
-                continue
-
-            # Get cash flow records for this asset to check from_own_capital flag
-            asset_cash_flows = cash_flow_repo.get_by_asset(
-                user_id=current_user.id,
-                asset_id=db_assets[i].id
-            )
-
-            # Group cash flows by from_own_capital flag
-            cash_flows_by_flag = {}
-            for cf in asset_cash_flows:
-                flag = cf.from_own_capital
-                if flag not in cash_flows_by_flag:
-                    cash_flows_by_flag[flag] = []
-                cash_flows_by_flag[flag].append(cf)
-
-            # Create breakdown items only for own capital deposits (employer deposits don't affect cash flow)
-            for from_own_capital, cfs in cash_flows_by_flag.items():
-                if not from_own_capital:
-                    continue  # Skip employer deposits - they don't pass through your bank account
-                # Build time series for this classification
-                series = []
-                for dt in all_dates:
-                    # Sum up all cash flows for this date that match this flag
-                    val = 0.0
-                    for cf in cfs:
-                        # Check if this date falls within the cash flow period
-                        cf_start = pd.Timestamp(cf.from_date).replace(day=1)
-                        cf_end = pd.Timestamp(cf.to_date).replace(day=1)
-                        if cf_start <= dt <= cf_end:
-                            # Get value from asset_df for this date
-                            matching = asset_df[asset_df["date"] == dt]
-                            if not matching.empty:
-                                val += float(matching[CASH_FLOW].iloc[0])
-
-                    series.append(TimeSeriesDataPoint(
-                        date=dt.date() if isinstance(dt, pd.Timestamp) else dt,
-                        value=Decimal(str(abs(val))),
-                    ))
-
-                # Classify by from_own_capital flag
-                if from_own_capital:
-                    # from_own_capital=True → category="deposit", source_type="expense"
-                    category = "deposit"
-                    source_type = "expense"
-                    source_name = f"{db_assets[i].name} - Own Capital"
-                else:
-                    # from_own_capital=False → category="external_deposit", source_type="income"
-                    category = "external_deposit"
-                    source_type = "income"
-                    source_name = f"{db_assets[i].name} - External Deposit"
-
-                breakdown_asset_cf_items.append(CashFlowItem(
-                    source_name=source_name,
-                    source_type=source_type,
-                    category=category,
-                    time_series=series,
-                    entity_id=db_assets[i].id,
-                    entity_type="asset",
-                ))
-
-        # Revenue stream items (income) — from assets with attached streams
-        for i, asset in enumerate(assets):
-            if not hasattr(asset, 'revenue_stream') or asset.revenue_stream is None:
-                continue
-            stream = asset.revenue_stream
-            # Salary and Rent streams support get_cash_flow()
-            if isinstance(stream, (SalaryRevenueStream, RentRevenueStream)):
-                try:
-                    cf_df = stream.get_cash_flow()
-                except Exception:
-                    continue
-                if cf_df.empty:
-                    continue
-                series = []
-                for dt in all_dates:
-                    ts = pd.Timestamp(dt)
-                    matching = cf_df[cf_df["date"] == ts]
-                    val = float(matching[CASH_FLOW].iloc[0]) if not matching.empty else 0.0
-                    series.append(TimeSeriesDataPoint(
-                        date=dt.date() if isinstance(dt, pd.Timestamp) else dt,
-                        value=Decimal(str(val)),
-                    ))
-                category = "rent" if isinstance(stream, RentRevenueStream) else "salary"
-                breakdown_revenue_items.append(CashFlowItem(
-                    source_name=f"{db_assets[i].name} - {category.title()}",
-                    source_type="income",
-                    category=category,
-                    time_series=series,
-                    entity_id=db_assets[i].id,
-                    entity_type="asset",
-                ))
-
-        # Pension income items — extract from PensionAsset CASH_FLOW
-        for i, asset in enumerate(assets):
-            if not isinstance(asset, PensionAsset):
-                continue
-            asset_df = all_asset_dfs[i]
-            if asset_df.empty or CASH_FLOW not in asset_df.columns:
-                continue
-            series = []
-            for dt in all_dates:
-                ts = pd.Timestamp(dt)
-                matching = asset_df[asset_df["date"] == ts]
-                val = float(matching[CASH_FLOW].iloc[0]) if not matching.empty else 0.0
-                series.append(TimeSeriesDataPoint(
-                    date=dt.date() if isinstance(dt, pd.Timestamp) else dt,
-                    value=Decimal(str(val)),
-                ))
-            breakdown_revenue_items.append(CashFlowItem(
-                source_name=f"{db_assets[i].name} - Pension",
-                source_type="income",
-                category="pension",
-                time_series=series,
-                entity_id=db_assets[i].id,
-                entity_type="asset",
-            ))
-
-        # Standalone revenue streams (salary, rent not attached to assets)
-        standalone_items = _project_standalone_revenue_streams(db, current_user.id, all_dates)
-        breakdown_revenue_items.extend(standalone_items)
-
-        # Standalone cash flows (expenditures/incomes not attached to any asset)
-        standalone_cf_items = _project_standalone_cash_flows(db, current_user.id, all_dates)
-        breakdown_asset_cf_items.extend(standalone_cf_items)
-
-        cash_flow_breakdown = _build_cash_flow_breakdown(
-            all_dates, breakdown_loan_items, breakdown_asset_cf_items, breakdown_revenue_items,
-        )
-
-        # Update net cash flow series to include revenue income
-        if cash_flow_breakdown.net_series:
-            cash_flow_series = cash_flow_breakdown.net_series
-
-        # Build accumulated cash asset from cumulative net cash flow
-        # This represents the running sum of surplus (or deficit) cash over time
-        if cash_flow_breakdown.net_series:
-            accumulated_cash_series: List[TimeSeriesDataPoint] = []
-            cumulative = 0.0
-            for point in cash_flow_breakdown.net_series:
-                cumulative += float(point.value)
-                # Allow negative values to show when strategy leads to bank overdraft
-                accumulated_cash_series.append(TimeSeriesDataPoint(
-                    date=point.date,
-                    value=Decimal(str(round(cumulative, 2))),
-                ))
-
-            # Add as a virtual asset projection (use id=0 for virtual)
-            asset_projections_list.append(AssetProjection(
-                asset_id=0,
-                asset_name="מזומנים מצטברים",
-                asset_type="cash",
-                time_series=accumulated_cash_series,
-            ))
-
-            # Update total_assets_series and net_worth_series to include accumulated cash
-            for i, point in enumerate(accumulated_cash_series):
-                if i < len(total_assets_series):
-                    old_asset_val = float(total_assets_series[i].value)
-                    new_asset_val = old_asset_val + float(point.value)
-                    total_assets_series[i] = TimeSeriesDataPoint(
-                        date=total_assets_series[i].date,
-                        value=Decimal(str(round(new_asset_val, 2))),
-                    )
-                if i < len(net_worth_series):
-                    old_nw_val = float(net_worth_series[i].value)
-                    new_nw_val = old_nw_val + float(point.value)
-                    net_worth_series[i] = TimeSeriesDataPoint(
-                        date=net_worth_series[i].date,
-                        value=Decimal(str(round(new_nw_val, 2))),
-                    )
-
-        # Build response and cache it
-        response = ProjectionResponse(
-            user_id=current_user.id,
+        response = compute_projection(
+            assets=assets,
+            loans=loans,
+            db_assets=db_assets,
+            db_loans=db_loans,
+            measurements=all_measurements,
             start_date=start_date,
             end_date=end_date,
-            net_worth_series=net_worth_series,
-            total_assets_series=total_assets_series,
-            total_liabilities_series=total_liabilities_series,
-            monthly_cash_flow_series=cash_flow_series,
-            cash_flow_breakdown=cash_flow_breakdown,
-            asset_projections=asset_projections_list,
-            loan_projections=loan_projections_list,
-            measurement_markers=all_markers,
+            months_to_project=months_to_project,
+            db=db,
+            user_id=current_user.id,
             is_historical=is_historical,
             historical_as_of_date=historical_as_of_date,
-            computed_at=datetime.now(),
         )
 
         # Store in cache

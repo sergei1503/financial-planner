@@ -1,5 +1,6 @@
 import { Routes, Route } from 'react-router-dom';
 import { Toaster } from 'sonner';
+import { Analytics } from '@vercel/analytics/react';
 import { AppShell } from '@/components/layout/app-shell';
 import { DashboardPage } from '@/features/dashboard/dashboard-page';
 import { AssetsPage } from '@/features/assets/assets-page';
@@ -24,6 +25,7 @@ function App() {
         </Route>
       </Routes>
       <Toaster position="top-center" dir="rtl" />
+      <Analytics />
     </>
   );
 }

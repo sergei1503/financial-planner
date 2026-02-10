@@ -17,6 +17,8 @@ import { Button } from '@/components/ui/button';
 interface LoanAmortizationChartProps {
   loanProjections: LoanProjection[];
   historicalLoanProjections?: LoanProjection[];
+  scenarioLoanProjections?: LoanProjection[];
+  scenarioName?: string;
 }
 
 const COLORS = ['#ef4444', '#f97316', '#8b5cf6', '#ec4899', '#06b6d4', '#14b8a6', '#3b82f6', '#22c55e'];
@@ -40,7 +42,7 @@ function formatTooltipValue(value: number) {
   }).format(value);
 }
 
-export function LoanAmortizationChart({ loanProjections }: LoanAmortizationChartProps) {
+export function LoanAmortizationChart({ loanProjections, scenarioLoanProjections, scenarioName }: LoanAmortizationChartProps) {
   const { t } = useTranslation();
   const [hiddenLoans, setHiddenLoans] = useState<Set<string>>(new Set());
 
@@ -100,6 +102,22 @@ export function LoanAmortizationChart({ loanProjections }: LoanAmortizationChart
         const idx = dateIndex.get(formattedDate);
         if (idx !== undefined) {
           (chartData[idx] as Record<string, unknown>)[`_m_${loan.loan_name}`] = m.actual_value;
+        }
+      }
+    }
+  }
+
+  // Merge scenario loan data if available
+  const hasScenario = scenarioLoanProjections && scenarioLoanProjections.length > 0;
+  if (hasScenario) {
+    const dateIndex = new Map(chartData.map((d, i) => [d.date, i]));
+    for (const loan of scenarioLoanProjections) {
+      const key = `_s_${loan.loan_name}`;
+      for (const point of loan.balance_series) {
+        const formatted = formatChartDate(point.date);
+        const idx = dateIndex.get(formatted);
+        if (idx !== undefined) {
+          (chartData[idx] as Record<string, unknown>)[key] = point.value;
         }
       }
     }
@@ -175,6 +193,21 @@ export function LoanAmortizationChart({ loanProjections }: LoanAmortizationChart
                 strokeWidth={2}
                 r={5}
                 shape="diamond"
+              />
+            );
+          })}
+          {hasScenario && scenarioLoanProjections!.map((loan, idx) => {
+            if (hiddenLoans.has(loan.loan_name)) return null;
+            return (
+              <Line
+                key={`scenario-${loan.loan_id}`}
+                type="monotone"
+                dataKey={`_s_${loan.loan_name}`}
+                name={`${scenarioName ?? t('scenarios.scenario')}: ${loan.loan_name}`}
+                stroke={COLORS[idx % COLORS.length]}
+                strokeWidth={2}
+                strokeDasharray="8 4"
+                dot={false}
               />
             );
           })}

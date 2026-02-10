@@ -13,7 +13,9 @@ import { CashFlowChart } from './cash-flow-chart';
 import { AssetBreakdownChart } from './asset-breakdown-chart';
 import { LoanAmortizationChart } from './loan-amortization-chart';
 import { LoanPaymentChart } from './loan-payment-chart';
+import { ScenarioPanel } from './scenario-panel';
 import { useRunProjection } from '@/hooks/use-projections';
+import type { ProjectionResponse } from '@/api/types';
 
 export function ProjectionsPage() {
   const { t } = useTranslation();
@@ -21,6 +23,8 @@ export function ProjectionsPage() {
   const [historicalDate, setHistoricalDate] = useState<Date | undefined>(undefined);
   const [currentProjection, setCurrentProjection] = useState(data);
   const [historicalProjection, setHistoricalProjection] = useState<typeof data | undefined>(undefined);
+  const [scenarioProjection, setScenarioProjection] = useState<ProjectionResponse | undefined>(undefined);
+  const [scenarioName, setScenarioName] = useState<string | undefined>(undefined);
 
   useEffect(() => {
     mutate({});
@@ -108,6 +112,12 @@ export function ProjectionsPage() {
           </div>
         </CardContent>
       </Card>
+      {/* Scenario Simulation */}
+      <ScenarioPanel onScenarioProjection={(data, name) => {
+        setScenarioProjection(data);
+        setScenarioName(name);
+      }} />
+
       {isPending && !displayData ? (
         <div className="space-y-6">
           <Skeleton className="h-[400px] w-full" />
@@ -139,6 +149,10 @@ export function ProjectionsPage() {
                 measurementMarkers={displayData.measurement_markers}
                 historicalNetWorth={historicalProjection?.net_worth_series}
                 historicalAsOfDate={historicalProjection?.historical_as_of_date}
+                scenarioNetWorth={scenarioProjection?.net_worth_series}
+                scenarioTotalAssets={scenarioProjection?.total_assets_series}
+                scenarioTotalLiabilities={scenarioProjection?.total_liabilities_series}
+                scenarioName={scenarioName}
               />
             </CardContent>
           </Card>
@@ -153,6 +167,8 @@ export function ProjectionsPage() {
                   data={displayData.monthly_cash_flow_series}
                   breakdown={displayData.cash_flow_breakdown}
                   historicalData={historicalProjection?.monthly_cash_flow_series}
+                  scenarioBreakdown={scenarioProjection?.cash_flow_breakdown}
+                  scenarioName={scenarioName}
                 />
               </CardContent>
             </Card>
@@ -165,6 +181,8 @@ export function ProjectionsPage() {
                 <AssetBreakdownChart
                   assetProjections={displayData.asset_projections}
                   historicalAssetProjections={historicalProjection?.asset_projections}
+                  scenarioAssetProjections={scenarioProjection?.asset_projections}
+                  scenarioName={scenarioName}
                 />
               </CardContent>
             </Card>
@@ -180,6 +198,8 @@ export function ProjectionsPage() {
                   <LoanAmortizationChart
                     loanProjections={displayData.loan_projections}
                     historicalLoanProjections={historicalProjection?.loan_projections}
+                    scenarioLoanProjections={scenarioProjection?.loan_projections}
+                    scenarioName={scenarioName}
                   />
                 </CardContent>
               </Card>
@@ -189,7 +209,11 @@ export function ProjectionsPage() {
                   <CardTitle>{t('projections.loan_payments_over_time')}</CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <LoanPaymentChart loanProjections={displayData.loan_projections} />
+                  <LoanPaymentChart
+                    loanProjections={displayData.loan_projections}
+                    scenarioLoanProjections={scenarioProjection?.loan_projections}
+                    scenarioName={scenarioName}
+                  />
                 </CardContent>
               </Card>
             </>

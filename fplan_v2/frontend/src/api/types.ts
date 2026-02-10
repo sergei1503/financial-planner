@@ -288,6 +288,59 @@ export interface HistoricalMeasurementResponse {
   recorded_at: string;
 }
 
+// Scenario types
+export const ScenarioActionType = {
+  PARAM_CHANGE: 'param_change',
+  NEW_ASSET: 'new_asset',
+  NEW_LOAN: 'new_loan',
+  REPAY_LOAN: 'repay_loan',
+  TRANSFORM_ASSET: 'transform_asset',
+  WITHDRAW_FROM_ASSET: 'withdraw_from_asset',
+  DEPOSIT_TO_ASSET: 'deposit_to_asset',
+  MARKET_CRASH: 'market_crash',
+  ADD_REVENUE_STREAM: 'add_revenue_stream',
+} as const;
+export type ScenarioActionType = (typeof ScenarioActionType)[keyof typeof ScenarioActionType];
+
+export interface ScenarioAction {
+  type: ScenarioActionType;
+  target_type?: string | null;
+  target_id?: number | null;
+  field?: string | null;
+  value?: unknown;
+  changes?: Record<string, unknown> | null;
+  params?: Record<string, unknown> | null;
+  crash_pct?: number | null;
+  crash_date?: string | null;
+  affected_asset_types?: string[] | null;
+  amount?: number | null;
+  action_date?: string | null;
+}
+
+export interface ScenarioCreate {
+  name: string;
+  description?: string | null;
+  actions: ScenarioAction[];
+}
+
+export interface ScenarioUpdate {
+  name?: string;
+  description?: string | null;
+  actions?: ScenarioAction[];
+  is_active?: boolean;
+}
+
+export interface ScenarioResponse {
+  id: number;
+  user_id: number;
+  name: string;
+  description: string | null;
+  actions: ScenarioAction[];
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface ErrorResponse {
   error: string;
   detail?: string;

@@ -20,6 +20,10 @@ interface NetWorthChartProps {
   measurementMarkers?: MeasurementMarker[];
   historicalNetWorth?: TimeSeriesDataPoint[];
   historicalAsOfDate?: string | null;
+  scenarioNetWorth?: TimeSeriesDataPoint[];
+  scenarioTotalAssets?: TimeSeriesDataPoint[];
+  scenarioTotalLiabilities?: TimeSeriesDataPoint[];
+  scenarioName?: string;
 }
 
 function formatChartDate(dateStr: string) {
@@ -47,6 +51,10 @@ export function NetWorthChart({
   totalLiabilities,
   measurementMarkers = [],
   historicalNetWorth,
+  scenarioNetWorth,
+  scenarioTotalAssets,
+  scenarioTotalLiabilities,
+  scenarioName,
 }: NetWorthChartProps) {
   const { t } = useTranslation();
 
@@ -56,6 +64,9 @@ export function NetWorthChart({
     assets: number;
     liabilities: number;
     historicalNetWorth?: number;
+    scenarioNetWorth?: number;
+    scenarioAssets?: number;
+    scenarioLiabilities?: number;
   };
 
   const merged: MergedData[] = netWorth.map((point, i) => ({
@@ -75,6 +86,27 @@ export function NetWorthChart({
       const historicalValue = historicalMap.get(point.date);
       if (historicalValue !== undefined) {
         point.historicalNetWorth = historicalValue;
+      }
+    });
+  }
+
+  // Merge scenario data if available
+  const hasScenario = scenarioNetWorth && scenarioNetWorth.length > 0;
+  if (hasScenario) {
+    const scenarioNWMap = new Map(scenarioNetWorth.map((p) => [formatChartDate(p.date), p.value]));
+    const scenarioAMap = scenarioTotalAssets ? new Map(scenarioTotalAssets.map((p) => [formatChartDate(p.date), p.value])) : null;
+    const scenarioLMap = scenarioTotalLiabilities ? new Map(scenarioTotalLiabilities.map((p) => [formatChartDate(p.date), p.value])) : null;
+
+    merged.forEach((point) => {
+      const nw = scenarioNWMap.get(point.date);
+      if (nw !== undefined) point.scenarioNetWorth = nw;
+      if (scenarioAMap) {
+        const a = scenarioAMap.get(point.date);
+        if (a !== undefined) point.scenarioAssets = a;
+      }
+      if (scenarioLMap) {
+        const l = scenarioLMap.get(point.date);
+        if (l !== undefined) point.scenarioLiabilities = l;
       }
     });
   }
@@ -141,6 +173,37 @@ export function NetWorthChart({
             strokeDasharray="5 5"
             dot={false}
           />
+        )}
+        {hasScenario && (
+          <>
+            <Line
+              type="monotone"
+              dataKey="scenarioNetWorth"
+              name={`${scenarioName ?? t('scenarios.scenario')}: ${t('charts.net_worth')}`}
+              stroke="#f59e0b"
+              strokeWidth={2}
+              strokeDasharray="8 4"
+              dot={false}
+            />
+            <Line
+              type="monotone"
+              dataKey="scenarioAssets"
+              name={`${scenarioName ?? t('scenarios.scenario')}: ${t('charts.total_assets')}`}
+              stroke="#84cc16"
+              strokeWidth={2}
+              strokeDasharray="8 4"
+              dot={false}
+            />
+            <Line
+              type="monotone"
+              dataKey="scenarioLiabilities"
+              name={`${scenarioName ?? t('scenarios.scenario')}: ${t('charts.total_liabilities')}`}
+              stroke="#f97316"
+              strokeWidth={2}
+              strokeDasharray="8 4"
+              dot={false}
+            />
+          </>
         )}
         {hasMeasurements && (
           <>
