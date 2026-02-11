@@ -35,6 +35,13 @@ class DatabaseConfig:
                 "Database URL not configured. Set NEON_DATABASE_URL or DATABASE_URL environment variable."
             )
 
+        # Log masked URL for debugging (hide password)
+        if '@' in self.database_url:
+            masked_url = self.database_url.split('@')[1]
+            print(f"Database: Connecting to {masked_url}")
+        else:
+            print("Database: Connection configured")
+
         # Connection pooling settings
         self.pool_size = int(os.getenv("DB_POOL_SIZE", "5"))
         self.max_overflow = int(os.getenv("DB_MAX_OVERFLOW", "10"))
@@ -118,11 +125,18 @@ class DatabaseManager:
 
         @event.listens_for(self._engine, "checkout")
         def check_connection(dbapi_conn, connection_record, connection_proxy):
-            """Verify connection is alive on checkout."""
+            """Verify connection is alive on checkout with timing."""
+            import time
+            start = time.time()
             cursor = dbapi_conn.cursor()
             try:
                 cursor.execute("SELECT 1")
-            except Exception:
+                elapsed_ms = (time.time() - start) * 1000
+                if elapsed_ms > 100:
+                    print(f"[WARNING] Slow connection health check: {elapsed_ms:.2f}ms")
+            except Exception as e:
+                elapsed_ms = (time.time() - start) * 1000
+                print(f"[ERROR] Connection health check failed after {elapsed_ms:.2f}ms: {e}")
                 # Connection is stale, raise to trigger reconnection
                 raise
             finally:

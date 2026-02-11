@@ -11,16 +11,19 @@ Provides REST API endpoints for:
 
 import os
 import logging
+import time
 from contextlib import asynccontextmanager
 from typing import Dict, Any
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from sqlalchemy import text
+from sqlalchemy.orm import Session
 
 logger = logging.getLogger("fplan")
 
-from fplan_v2.db.connection import get_engine, init_db
+from fplan_v2.db.connection import get_engine, init_db, get_db_session
 from fplan_v2.api.routes import assets, loans, revenue_streams, projections, historical_measurements, cash_flows, demo, scenarios
 
 
@@ -93,6 +96,27 @@ async def health_check() -> Dict[str, str]:
         "version": "2.0.0",
         "service": "fplan-api",
     }
+
+
+@app.get("/health/db")
+async def health_check_db(db: Session = Depends(get_db_session)):
+    """Check database connection health and latency."""
+    start = time.time()
+    try:
+        db.execute(text("SELECT 1"))
+        latency_ms = (time.time() - start) * 1000
+        return {
+            "status": "healthy",
+            "latency_ms": round(latency_ms, 2),
+            "database": "neon-postgresql"
+        }
+    except Exception as e:
+        latency_ms = (time.time() - start) * 1000
+        return {
+            "status": "unhealthy",
+            "latency_ms": round(latency_ms, 2),
+            "error": str(e)
+        }
 
 
 # Include routers
