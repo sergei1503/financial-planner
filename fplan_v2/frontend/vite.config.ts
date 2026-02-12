@@ -23,4 +23,21 @@ export default defineConfig({
       },
     },
   },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'react-vendor': ['react', 'react-dom', 'react-router-dom'],
+          'ui-vendor': ['lucide-react', 'sonner', 'date-fns'],
+          'charts': ['recharts'],
+          'clerk': ['@clerk/clerk-react'],
+          'query': ['@tanstack/react-query'],
+        },
+      },
+    },
+    // Enable source maps for better debugging in production
+    sourcemap: true,
+    // Increase chunk size warning limit (default 500KB)
+    chunkSizeWarningLimit: 1000,
+  },
 })

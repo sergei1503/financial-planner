@@ -6,6 +6,7 @@ Provides financial projection and portfolio analysis endpoints.
 
 import hashlib
 import json
+import logging
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Dict, Any, List
@@ -13,7 +14,9 @@ from dateutil.relativedelta import relativedelta
 import pandas as pd
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
+
+logger = logging.getLogger(__name__)
 
 from fplan_v2.api.schemas import (
     ProjectionRequest,
@@ -710,9 +713,9 @@ def _apply_measurement_shifts(
     return asset_markers, loan_markers
 
 
-def _build_cache_key(user: User, request: ProjectionRequest) -> str:
-    """Build a SHA-256 cache key from portfolio version and request params."""
-    key_data = f"{user.portfolio_version}:{request.start_date}:{request.end_date}:{request.as_of_date}"
+def _build_cache_key(user: User, start_date: date, end_date: date, as_of_date: date = None) -> str:
+    """Build a SHA-256 cache key from portfolio version and actual dates used."""
+    key_data = f"{user.portfolio_version}:{start_date}:{end_date}:{as_of_date}"
     return hashlib.sha256(key_data.encode()).hexdigest()
 
 
@@ -1228,10 +1231,16 @@ def run_projection(
             detail="End date must be after start date",
         )
 
-    # Check projection cache
-    cache_key = _build_cache_key(current_user, request)
+    # Check projection cache using actual transformed dates
+    logger.info(f"[CACHE] Building cache key for user_id={current_user.id}, start={start_date}, end={end_date}, as_of={historical_as_of_date}")
+    cache_key = _build_cache_key(current_user, start_date, end_date, historical_as_of_date)
+    logger.info(f"[CACHE] Generated cache_key: {cache_key}")
+
     cached = _get_cached_projection(db, current_user.id, cache_key)
+    logger.info(f"[CACHE] Cache lookup result: {'HIT' if cached else 'MISS'}")
+
     if cached:
+        logger.info(f"[CACHE] Returning cached projection (computed_at={cached.computed_at})")
         return ProjectionResponse(**cached.result_json)
 
     # Initialize repositories
@@ -1239,9 +1248,18 @@ def run_projection(
     loan_repo = LoanRepository(db)
     measurement_repo = HistoricalMeasurementRepository(db)
 
-    # Load user's portfolio from database
-    db_assets = asset_repo.get_all(user_id=current_user.id, limit=1000)
-    db_loans = loan_repo.get_all(user_id=current_user.id, limit=1000)
+    # Load user's portfolio from database with eager loading to eliminate N+1 queries
+    from fplan_v2.db.models import Asset as AssetModel, Loan as LoanModel
+    db_assets = asset_repo.get_all(
+        user_id=current_user.id,
+        limit=1000,
+        eager_load=[AssetModel.revenue_streams, AssetModel.cash_flows]
+    )
+    db_loans = loan_repo.get_all(
+        user_id=current_user.id,
+        limit=1000,
+        eager_load=[LoanModel.collateral_asset]
+    )
 
     # Load historical measurements - filter by as_of_date if in historical mode
     if is_historical:
@@ -1294,7 +1312,9 @@ def run_projection(
         )
 
         # Store in cache
+        logger.info(f"[CACHE] Storing projection in cache with key: {cache_key}")
         _store_cached_projection(db, current_user.id, cache_key, response)
+        logger.info(f"[CACHE] Projection cached successfully")
 
         return response
 
@@ -1318,26 +1338,23 @@ def get_portfolio_summary(
     - Total liabilities
     - Net worth
     - Monthly cash flows
+
+    Optimized to use a single SQL query instead of 7 separate queries.
     """
     user_id = current_user.id
-    asset_repo = AssetRepository(db)
-    loan_repo = LoanRepository(db)
-    revenue_repo = RevenueStreamRepository(db)
 
-    # Get current totals
-    total_assets = asset_repo.calculate_total_value(user_id)
-    total_liabilities = loan_repo.calculate_total_balance(user_id)
+    # Use optimized single-query method from BaseRepository
+    from fplan_v2.db.repositories.base import BaseRepository
+    base_repo = BaseRepository(User, db)
+    summary = base_repo.get_portfolio_summary_optimized(user_id)
+
+    # Calculate derived values
+    total_assets = summary["total_assets"]
+    total_liabilities = summary["total_liabilities"]
     net_worth = total_assets - total_liabilities
-
-    # Get monthly cash flows
-    monthly_revenue = revenue_repo.calculate_monthly_revenue(user_id)
-    monthly_loan_payments = loan_repo.calculate_monthly_payments(user_id)
+    monthly_revenue = summary["monthly_revenue"]
+    monthly_loan_payments = summary["monthly_payments"]
     monthly_net_cash_flow = monthly_revenue - monthly_loan_payments
-
-    # Get counts
-    asset_count = asset_repo.count(user_id)
-    loan_count = loan_repo.count(user_id)
-    revenue_stream_count = revenue_repo.count(user_id)
 
     return PortfolioSummary(
         user_id=user_id,
@@ -1347,9 +1364,9 @@ def get_portfolio_summary(
         monthly_revenue=Decimal(str(monthly_revenue)),
         monthly_loan_payments=Decimal(str(monthly_loan_payments)),
         monthly_net_cash_flow=Decimal(str(monthly_net_cash_flow)),
-        asset_count=asset_count,
-        loan_count=loan_count,
-        revenue_stream_count=revenue_stream_count,
+        asset_count=summary["asset_count"],
+        loan_count=summary["loan_count"],
+        revenue_stream_count=summary["stream_count"],
         as_of_date=date.today(),
     )
 
