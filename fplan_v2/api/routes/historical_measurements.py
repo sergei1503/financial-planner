@@ -26,6 +26,27 @@ from fplan_v2.db.repositories import (
 router = APIRouter()
 
 
+def _sync_entity_value(db: Session, user_id: int, entity_type: str, entity_id: int) -> None:
+    """
+    Sync the entity's current value to its latest-by-date measurement.
+
+    The displayed current_value/current_balance must always reflect the most
+    recent measurement_date, not the most recently inserted row — backfilled
+    older measurements must not clobber a newer value. If the entity has no
+    measurements left, the entity value is left unchanged.
+    """
+    repo = HistoricalMeasurementRepository(db)
+    measurements = repo.get_by_entity(user_id, entity_type, entity_id)
+    if not measurements:
+        return
+
+    latest = max(measurements, key=lambda m: (m.measurement_date, m.id))
+    if entity_type == "asset":
+        AssetRepository(db).update(entity_id, current_value=latest.actual_value)
+    elif entity_type == "loan":
+        LoanRepository(db).update(entity_id, current_balance=latest.actual_value)
+
+
 @router.post("/", response_model=HistoricalMeasurementResponse, status_code=status.HTTP_201_CREATED)
 def create_measurement(
     measurement: HistoricalMeasurementCreate,
@@ -40,13 +61,8 @@ def create_measurement(
             **measurement.model_dump(),
         )
 
-        # Update the entity's current_value/current_balance to reflect this measurement
-        if measurement.entity_type == "asset":
-            asset_repo = AssetRepository(db)
-            asset_repo.update(measurement.entity_id, current_value=measurement.actual_value)
-        elif measurement.entity_type == "loan":
-            loan_repo = LoanRepository(db)
-            loan_repo.update(measurement.entity_id, current_balance=measurement.actual_value)
+        # Sync the entity's current_value/current_balance to the latest-by-date measurement
+        _sync_entity_value(db, current_user.id, measurement.entity_type, measurement.entity_id)
 
         db.commit()
         db.refresh(new_measurement)
@@ -133,6 +149,7 @@ def update_measurement(
     try:
         update_data = {k: v for k, v in measurement_update.model_dump().items() if v is not None}
         updated = repo.update(measurement_id, **update_data)
+        _sync_entity_value(db, current_user.id, updated.entity_type, updated.entity_id)
         db.commit()
         db.refresh(updated)
         return updated
@@ -165,7 +182,9 @@ def delete_measurement(
         )
 
     try:
+        entity_type, entity_id = existing.entity_type, existing.entity_id
         repo.delete(measurement_id)
+        _sync_entity_value(db, current_user.id, entity_type, entity_id)
         db.commit()
     except Exception as e:
         db.rollback()

@@ -19,6 +19,10 @@ export function useCreateMeasurement() {
       qc.invalidateQueries({
         queryKey: ['historical-measurements', variables.entity_type, variables.entity_id],
       });
+      qc.invalidateQueries({ queryKey: ['assets'] });
+      qc.invalidateQueries({ queryKey: ['loans'] });
+      qc.invalidateQueries({ queryKey: ['portfolio-summary'] });
+      qc.invalidateQueries({ queryKey: ['projection'] });
     },
   });
 }
@@ -30,6 +34,10 @@ export function useUpdateMeasurement() {
       historicalMeasurementsApi.update(id, data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['historical-measurements'] });
+      qc.invalidateQueries({ queryKey: ['assets'] });
+      qc.invalidateQueries({ queryKey: ['loans'] });
+      qc.invalidateQueries({ queryKey: ['portfolio-summary'] });
+      qc.invalidateQueries({ queryKey: ['projection'] });
     },
   });
 }
@@ -40,6 +48,10 @@ export function useDeleteMeasurement() {
     mutationFn: (id: number) => historicalMeasurementsApi.delete(id),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['historical-measurements'] });
+      qc.invalidateQueries({ queryKey: ['assets'] });
+      qc.invalidateQueries({ queryKey: ['loans'] });
+      qc.invalidateQueries({ queryKey: ['portfolio-summary'] });
+      qc.invalidateQueries({ queryKey: ['projection'] });
     },
   });
 }
