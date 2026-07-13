@@ -16,6 +16,13 @@ from dateutil.relativedelta import relativedelta
 from fplan_v2.core.constants import EIndexType
 from fplan_v2.utils.error_utils import error_handler
 
+# Long-run Bank of Israel policy rate that the prime path mean-reverts to beyond the last
+# known change (BoI ~3.0% → prime ~4.5%). Research-based default; see engine-followups memory.
+EXPECTED_LONG_RUN_BOI_RATE = 3.0
+# Years over which the prime rate linearly normalizes from its last observed level to the
+# long-run level.
+PRIME_MEAN_REVERSION_YEARS = 3
+
 
 class IndexTracker:
     """
@@ -143,6 +150,27 @@ class IndexTracker:
         df = df.reset_index(drop=True)
         return df
 
+    def _extend_prime_to_long_run(self, df: pd.DataFrame, start_date, duration: int) -> pd.DataFrame:
+        """Append synthetic future prime rows that normalize toward the long-run rate, so a
+        prime loan mean-reverts rather than holding the last observed rate flat for decades."""
+        if df.empty:
+            return df
+        last_date = df.iloc[-1]["start"]
+        last_rate = float(df.iloc[-1]["rate"])
+        if abs(last_rate - EXPECTED_LONG_RUN_BOI_RATE) < 1e-9:
+            return df
+        horizon_end = pd.Timestamp(start_date) + relativedelta(months=int(duration))
+        rows = []
+        for k in range(1, PRIME_MEAN_REVERSION_YEARS + 1):
+            step_date = last_date + relativedelta(years=k)
+            if step_date >= horizon_end:
+                break
+            rate = last_rate + (EXPECTED_LONG_RUN_BOI_RATE - last_rate) * k / PRIME_MEAN_REVERSION_YEARS
+            rows.append({"start": step_date, "end": pd.NaT, "rate": rate})
+        if rows:
+            df = pd.concat([df, pd.DataFrame(rows)], ignore_index=True).sort_values("start").reset_index(drop=True)
+        return df
+
     @error_handler
     def prepare_prime_index_history(self, index_type: str, start_date: pd.Timestamp, duration: int) -> pd.DataFrame:
         """
@@ -161,6 +189,10 @@ class IndexTracker:
 
         df["start"] = pd.to_datetime(df["start"], dayfirst=True)
         df = df.sort_values("start")
+
+        # Extend the prime path beyond the last known change toward the long-run level, so a
+        # prime loan mean-reverts instead of holding the last observed rate flat for decades.
+        df = self._extend_prime_to_long_run(df, start_date, duration)
 
         start_date_rate_index = df.start.searchsorted(start_date) - 1
         start_date_rate = df.iloc[start_date_rate_index]["rate"]

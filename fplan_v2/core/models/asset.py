@@ -509,7 +509,10 @@ class CashAsset(Asset):
         for i in range(months_to_project):
             monthly_cash_flow = 0
             if date.month == 1:
-                value *= 1 - self.yearly_fee
+                # yearly_fee_pct is a percent (e.g. 0.2 == 0.2%); divide by 100 like the
+                # Stock/Pension paths do. (Was `1 - self.yearly_fee`, which applied the raw
+                # percent as a fraction — a 0.2 fee became a 20% annual haircut.)
+                value *= 1 - self.yearly_fee_pct / 100.0
 
             for deposit in self.deposits:
                 from_date = deposit["from"]
