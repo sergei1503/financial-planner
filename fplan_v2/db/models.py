@@ -59,9 +59,36 @@ class User(Base):
     revenue_streams = relationship("RevenueStream", back_populates="user", cascade="all, delete-orphan")
     cash_flows = relationship("CashFlow", back_populates="user", cascade="all, delete-orphan")
     scenarios = relationship("Scenario", back_populates="user", cascade="all, delete-orphan")
+    portfolios = relationship("Portfolio", back_populates="user", cascade="all, delete-orphan")
 
     def __repr__(self):
         return f"<User(id={self.id}, name='{self.name}', email='{self.email}')>"
+
+
+class Portfolio(Base):
+    """
+    A named portfolio owned by a user. Assets, loans, cash flows, revenue streams,
+    historical measurements and scenarios all belong to a portfolio (a user may have
+    several). Household sharing with other users is a later add-on via a join table.
+    """
+    __tablename__ = "portfolios"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    name = Column(Text, nullable=False)
+    is_default = Column(Boolean, default=False, nullable=False)
+    portfolio_version = Column(Integer, default=1, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    user = relationship("User", back_populates="portfolios")
+
+    __table_args__ = (
+        Index("idx_portfolios_user_id", "user_id"),
+    )
+
+    def __repr__(self):
+        return f"<Portfolio(id={self.id}, name='{self.name}', user_id={self.user_id})>"
 
 
 class Asset(Base):
@@ -69,6 +96,7 @@ class Asset(Base):
 
     id = Column(Integer, primary_key=True)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    portfolio_id = Column(Integer, ForeignKey("portfolios.id", ondelete="CASCADE"), nullable=True, index=True)
     external_id = Column(Text, nullable=False)
     asset_type = Column(Text, nullable=False)
     name = Column(Text, nullable=False)
@@ -113,6 +141,7 @@ class Loan(Base):
 
     id = Column(Integer, primary_key=True)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    portfolio_id = Column(Integer, ForeignKey("portfolios.id", ondelete="CASCADE"), nullable=True, index=True)
     external_id = Column(Text, nullable=False)
     loan_type = Column(Text, nullable=False)
     name = Column(Text, nullable=False)
@@ -154,6 +183,7 @@ class RevenueStream(Base):
 
     id = Column(Integer, primary_key=True)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    portfolio_id = Column(Integer, ForeignKey("portfolios.id", ondelete="CASCADE"), nullable=True, index=True)
     asset_id = Column(Integer, ForeignKey("assets.id", ondelete="CASCADE"))
     stream_type = Column(Text, nullable=False)
     name = Column(Text, nullable=False)
@@ -195,6 +225,7 @@ class CashFlow(Base):
 
     id = Column(Integer, primary_key=True)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    portfolio_id = Column(Integer, ForeignKey("portfolios.id", ondelete="CASCADE"), nullable=True, index=True)
     flow_type = Column(Text, nullable=False)
     target_asset_id = Column(Integer, ForeignKey("assets.id", ondelete="CASCADE"))
     name = Column(Text, nullable=False)
@@ -232,6 +263,7 @@ class HistoricalMeasurement(Base):
 
     id = Column(Integer, primary_key=True)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    portfolio_id = Column(Integer, ForeignKey("portfolios.id", ondelete="CASCADE"), nullable=True, index=True)
     entity_type = Column(Text, nullable=False)
     entity_id = Column(Integer, nullable=False)
     measurement_date = Column(Date, nullable=False)
@@ -277,6 +309,26 @@ class ProjectionCache(Base):
 
     def __repr__(self):
         return f"<ProjectionCache(id={self.id}, user_id={self.user_id}, cache_key='{self.cache_key[:16]}...')>"
+
+
+class ScenarioCache(Base):
+    __tablename__ = "scenario_cache"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    scenario_id = Column(Integer, ForeignKey("scenarios.id", ondelete="CASCADE"), nullable=False)
+    cache_key = Column(Text, nullable=False)
+    result_json = Column(JSONB, nullable=False)
+    computed_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("scenario_id", "cache_key", name="uq_scenario_cache_scenario_key"),
+        Index("idx_scenario_cache_user", "user_id"),
+        Index("idx_scenario_cache_scenario", "scenario_id"),
+    )
+
+    def __repr__(self):
+        return f"<ScenarioCache(id={self.id}, scenario_id={self.scenario_id}, cache_key='{self.cache_key[:16]}...')>"
 
 
 # ======================
@@ -375,6 +427,7 @@ class Scenario(Base):
 
     id = Column(Integer, primary_key=True)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    portfolio_id = Column(Integer, ForeignKey("portfolios.id", ondelete="CASCADE"), nullable=True, index=True)
     name = Column(Text, nullable=False)
     description = Column(Text)
     version = Column(Integer, nullable=False, default=1)

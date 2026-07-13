@@ -26,6 +26,7 @@ from fplan_v2.db.models import (
     CashFlow,
     HistoricalMeasurement,
     Loan,
+    Portfolio,
     RevenueStream,
     User,
 )
@@ -51,7 +52,7 @@ def parse_date(s: str) -> date:
     return date.fromisoformat(s)
 
 
-def load(config_path: Path, user_id: int, email: str) -> None:
+def load(config_path: Path, user_id: int, email: str, portfolio_name: str = "My Portfolio") -> None:
     with open(config_path) as f:
         config = json.load(f)
 
@@ -66,11 +67,26 @@ def load(config_path: Path, user_id: int, email: str) -> None:
             session.flush()
             print(f"Created user id={user.id} ({user.email})")
         else:
-            print(f"Reusing user id={user.id} ({user.email}) — wiping its data")
+            print(f"Reusing user id={user.id} ({user.email})")
 
-        # Wipe existing data for this user so re-runs are idempotent
+        # Find or create the target portfolio for this user
+        portfolio = (
+            session.query(Portfolio)
+            .filter_by(user_id=user.id, name=portfolio_name)
+            .first()
+        )
+        if not portfolio:
+            is_first = session.query(Portfolio).filter_by(user_id=user.id).count() == 0
+            portfolio = Portfolio(user_id=user.id, name=portfolio_name, is_default=is_first)
+            session.add(portfolio)
+            session.flush()
+            print(f"Created portfolio id={portfolio.id} ({portfolio.name}, default={portfolio.is_default})")
+        else:
+            print(f"Reusing portfolio id={portfolio.id} ({portfolio.name}) — wiping its data")
+
+        # Wipe existing data for THIS portfolio so re-runs are idempotent
         for model in [HistoricalMeasurement, CashFlow, RevenueStream, Loan, Asset]:
-            count = session.query(model).filter_by(user_id=user.id).delete()
+            count = session.query(model).filter_by(portfolio_id=portfolio.id).delete()
             if count:
                 print(f"  Deleted {count} existing {model.__tablename__}")
         session.flush()
@@ -87,7 +103,7 @@ def load(config_path: Path, user_id: int, email: str) -> None:
                 if data.get(k) is not None:
                     config_json[k] = data[k]
             asset = Asset(
-                user_id=user.id,
+                user_id=user.id, portfolio_id=portfolio.id,
                 external_id=name,
                 asset_type=ASSET_TYPE_MAP.get(v1_type, "stock"),
                 name=name,
@@ -107,7 +123,7 @@ def load(config_path: Path, user_id: int, email: str) -> None:
             for entry in data.get("history", []):
                 session.add(
                     HistoricalMeasurement(
-                        user_id=user.id,
+                        user_id=user.id, portfolio_id=portfolio.id,
                         entity_type="asset",
                         entity_id=asset.id,
                         measurement_date=parse_date(entry["date"]),
@@ -131,7 +147,7 @@ def load(config_path: Path, user_id: int, email: str) -> None:
             if deposit_amount > 0 and data.get("deposit_from") and data.get("deposit_to"):
                 session.add(
                     CashFlow(
-                        user_id=user.id,
+                        user_id=user.id, portfolio_id=portfolio.id,
                         flow_type="deposit",
                         target_asset_id=asset.id,
                         name=f"deposit_{name}",
@@ -148,7 +164,7 @@ def load(config_path: Path, user_id: int, email: str) -> None:
             if monthly_payout > 0 and rs.get("start_dividend_withdraw_date"):
                 session.add(
                     RevenueStream(
-                        user_id=user.id,
+                        user_id=user.id, portfolio_id=portfolio.id,
                         asset_id=asset.id,
                         stream_type="pension",
                         name=f"payout_{name}",
@@ -164,7 +180,7 @@ def load(config_path: Path, user_id: int, email: str) -> None:
             if rs.get("type") == "rent" and Decimal(str(rs.get("monthly_cashflow", "0"))) > 0:
                 session.add(
                     RevenueStream(
-                        user_id=user.id,
+                        user_id=user.id, portfolio_id=portfolio.id,
                         asset_id=asset.id,
                         stream_type="rent",
                         name=f"rent_{name}",
@@ -190,7 +206,7 @@ def load(config_path: Path, user_id: int, email: str) -> None:
                 original = Decimal(str(loan_data["original_value"]))
                 session.add(
                     Loan(
-                        user_id=user.id,
+                        user_id=user.id, portfolio_id=portfolio.id,
                         external_id=loan_data["name"],
                         loan_type=v2_type,
                         name=loan_data["name"],
@@ -210,7 +226,7 @@ def load(config_path: Path, user_id: int, email: str) -> None:
             amount = abs(Decimal(str(data["amount"])))
             session.add(
                 CashFlow(
-                    user_id=user.id,
+                    user_id=user.id, portfolio_id=portfolio.id,
                     flow_type="withdrawal",
                     name=name,
                     amount=amount,
