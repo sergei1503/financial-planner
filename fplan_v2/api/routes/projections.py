@@ -357,14 +357,13 @@ def _apply_cash_conversions(
         if db_asset.sell_date:
             sell_ts = pd.Timestamp(db_asset.sell_date).replace(day=1)
             if sell_ts < sentinel and sell_ts >= start_ts:
-                # Find asset value at sell date
-                sell_rows = asset_df[asset_df["date"] == sell_ts]
-                if not sell_rows.empty:
-                    sale_value = float(sell_rows[VALUE].iloc[0])
-                else:
-                    # Use last known value before sell date
-                    before_sell = asset_df[asset_df["date"] <= sell_ts]
-                    sale_value = float(before_sell[VALUE].iloc[-1]) if not before_sell.empty else 0
+                # Asset.get_projection() intentionally zeroes VALUE on the exact row at the
+                # extraction/sell month (e.g. StockAsset.get_projection), so an exact-date
+                # match at sell_ts reads the post-liquidation 0, not the pre-sale balance —
+                # which would credit 0 proceeds to cash. Use the last known NON-ZERO value
+                # at or before the sell month.
+                before_sell = asset_df[(asset_df["date"] <= sell_ts) & (asset_df[VALUE] != 0)]
+                sale_value = float(before_sell[VALUE].iloc[-1]) if not before_sell.empty else 0
 
                 sell_tax = float(db_asset.sell_tax or 0) / 100
                 proceeds = sale_value * (1 - sell_tax)
@@ -630,6 +629,12 @@ def _apply_measurement_shifts(
         markers = []
         df = asset_dfs[i].sort_values("date").reset_index(drop=True)
 
+        # Rows the asset model deliberately zeroed — a sale (extraction_date) or a pension
+        # annuitization (conversion_date) — must STAY zero. The additive delta below would
+        # otherwise resurrect them into a phantom (often negative) value. Snapshot them here
+        # and restore after all shifts are applied.
+        structural_zeros = df[VALUE].astype(float) == 0.0
+
         for m in entity_measurements:
             m_date = pd.Timestamp(m.measurement_date).replace(day=1)
             actual_value = float(m.actual_value)
@@ -658,6 +663,9 @@ def _apply_measurement_shifts(
 
             # Shift this point and all subsequent points by the delta
             df.loc[match_idx:, VALUE] = df.loc[match_idx:, VALUE].astype(float) + delta
+
+        # Restore deliberately-zeroed rows (sale / annuitization) to exactly 0
+        df.loc[structural_zeros, VALUE] = 0.0
 
         asset_dfs[i] = df
         asset_markers[i] = markers
@@ -784,7 +792,18 @@ def compute_projection(
     all_asset_dfs: List[pd.DataFrame] = []
 
     for asset in assets:
-        df = asset.get_projection(months_to_project=months_to_project)
+        # Each asset's get_projection() counts months from its OWN start_date, so passing
+        # a single global month count makes assets end on staggered dates and silently drop
+        # out of the aggregate early — producing phantom net-worth cliffs. Derive a per-asset
+        # month count so every asset's series lands on the shared end_date.
+        asset_start = getattr(asset, "start_date", None) or start_date
+        asset_months = max(
+            0,
+            (end_date.year - asset_start.year) * 12
+            + (end_date.month - asset_start.month)
+            + 1,
+        )
+        df = asset.get_projection(months_to_project=asset_months)
         all_asset_dfs.append(df)
 
     # Apply sell→cash conversions and deposit cash flow impact
