@@ -798,11 +798,11 @@ class StockAsset(Asset):
                     if should_apply_to_value:
                         value += float(deposit["amount"])
 
-                    # ALWAYS track cash flow for breakdown (needed for cash flow breakdown UI)
+                    # Track cash flow for the breakdown UI. Only own-capital deposits are the
+                    # user's expense; employer-funded deposits grow the fund but never pass
+                    # through the user's bank account, so they have no cash-flow impact.
                     if deposit.get("deposit_from_own_capital", False):
                         monthly_cash_flow -= float(deposit["amount"])  # Own capital = expense
-                    else:
-                        monthly_cash_flow += float(deposit["amount"])  # External deposit = income
 
             # Handle withdrawals
             for withdrawal in self.withdrawals:

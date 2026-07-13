@@ -611,3 +611,130 @@ class TestProjectionEngineFixes:
         assert post, "no post-conversion points found"
         offenders = [v for v in post if abs(v) >= 0.01]
         assert not offenders, f"pension not zero after annuitization: {offenders[:3]}"
+
+
+class TestRealisticModelingFixes:
+    """Regression tests for the loan-realism and pension/employer cash-flow fixes."""
+
+    def _loan_payments(self, data, name):
+        for lp in data["loan_projections"]:
+            if lp["loan_name"] == name:
+                return {p["date"]: float(p["value"]) for p in lp["payment_series"]}
+        return {}
+
+    def _asset_series(self, data, name):
+        for ap in data["asset_projections"]:
+            if ap["asset_name"] == name:
+                return {p["date"]: float(p["value"]) for p in ap["time_series"]}
+        return {}
+
+    def test_cpi_loan_payment_keeps_indexing_after_last_real_cpi(self):
+        """A CPI-linked loan's payment must keep growing with expected CPI past the last real
+        data point — not freeze flat (the dead reindex/ffill extension bug)."""
+        db = TestingSessionLocal()
+        try:
+            db.add(Loan(
+                user_id=1, external_id="cpi-1", loan_type="cpi_pegged", name="CPI Loan",
+                start_date=date(2022, 5, 1), original_value=325000,
+                interest_rate_annual_pct=2.25, duration_months=360,
+                config_json={"expected_cpi_increase_percent_yearly": 3},
+            ))
+            db.commit()
+        finally:
+            db.close()
+        resp = client.post("/api/projections/run", json={
+            "start_date": "2022-05-01", "end_date": "2052-05-01"})
+        assert resp.status_code == 200, resp.text
+        pay = self._loan_payments(resp.json(), "CPI Loan")
+        p2026, p2050 = pay.get("2026-01-01"), pay.get("2050-01-01")
+        assert p2026 and p2050, f"missing CPI payment points: {sorted(pay)[:2]}"
+        # ~2.5-3%/yr indexing over 24 years should lift the payment well above 1.5x, not freeze.
+        assert p2050 > p2026 * 1.5, f"CPI payment froze instead of indexing: 2026={p2026:.0f} 2050={p2050:.0f}"
+
+    def test_prime_loan_reacts_to_rate_cycle(self):
+        """A prime-pegged loan's payment must move materially with the prime cycle (2022-23
+        hikes of ~+4pp), not stay nearly flat (single-step-delta bug)."""
+        db = TestingSessionLocal()
+        try:
+            db.add(Loan(
+                user_id=1, external_id="prime-1", loan_type="prime_pegged", name="Prime Loan",
+                start_date=date(2022, 5, 1), original_value=600000,
+                interest_rate_annual_pct=2.4, duration_months=360, config_json={},
+            ))
+            db.commit()
+        finally:
+            db.close()
+        resp = client.post("/api/projections/run", json={
+            "start_date": "2022-05-01", "end_date": "2035-01-01"})
+        assert resp.status_code == 200, resp.text
+        vals = list(self._loan_payments(resp.json(), "Prime Loan").values())
+        assert vals, "no prime payments"
+        assert max(vals) > min(vals) * 1.2, f"prime payment barely reacted: {min(vals):.0f}..{max(vals):.0f}"
+
+    def test_pension_income_item_never_negative(self):
+        """The pension breakdown 'income' item must never go negative — deposit contributions
+        (negative cash flow) must not leak in as negative income (the double-count bug)."""
+        db = TestingSessionLocal()
+        try:
+            asset = Asset(
+                user_id=1, external_id="pension-x", asset_type="pension", name="Pension X",
+                start_date=date(2022, 1, 1), original_value=200000,
+                appreciation_rate_annual_pct=4, yearly_fee_pct=0, sell_tax=0, currency="ILS",
+                config_json={"conversion_date": "2035-01-01", "conversion_coefficient": 200},
+            )
+            db.add(asset)
+            db.flush()
+            db.add(CashFlow(
+                user_id=1, flow_type="deposit", target_asset_id=asset.id, name="pension deposit",
+                amount=3000, from_date=date(2022, 1, 1), to_date=date(2035, 1, 1),
+                from_own_capital=True,
+            ))
+            db.commit()
+        finally:
+            db.close()
+        resp = client.post("/api/projections/run", json={
+            "start_date": "2024-01-01", "end_date": "2045-01-01"})
+        assert resp.status_code == 200, resp.text
+        bd = resp.json()["cash_flow_breakdown"]
+        items = [it for it in bd["items"] if it["source_name"] == "Pension X - Pension"]
+        assert items, "no pension income item found"
+        negs = [float(p["value"]) for it in items for p in it["time_series"] if float(p["value"]) < 0]
+        assert not negs, f"pension income item leaked negative deposit values: {negs[:3]}"
+
+    def test_employer_stock_deposit_is_not_expense_or_cash(self):
+        """A from_own_capital=false (employer) deposit on a stock asset must not appear as the
+        user's expense and must not be credited to the user's cash balance."""
+        db = TestingSessionLocal()
+        try:
+            asset = Asset(
+                user_id=1, external_id="stock-emp", asset_type="stock", name="Employer Stock",
+                start_date=date(2020, 1, 1), original_value=100000, appreciation_rate_annual_pct=5,
+                yearly_fee_pct=0, sell_tax=0, currency="ILS", config_json={},
+            )
+            db.add(asset)
+            db.flush()
+            db.add(CashFlow(
+                user_id=1, flow_type="deposit", target_asset_id=asset.id, name="employer deposit",
+                amount=2000, from_date=date(2024, 1, 1), to_date=date(2030, 1, 1),
+                from_own_capital=False,
+            ))
+            db.add(Asset(
+                user_id=1, external_id="cash-e", asset_type="cash", name="Cash E",
+                start_date=date(2020, 1, 1), original_value=50000, appreciation_rate_annual_pct=0,
+                yearly_fee_pct=0, sell_tax=0, currency="ILS", config_json={},
+            ))
+            db.commit()
+        finally:
+            db.close()
+        resp = client.post("/api/projections/run", json={
+            "start_date": "2024-01-01", "end_date": "2028-01-01"})
+        assert resp.status_code == 200, resp.text
+        data = resp.json()
+        bd = data["cash_flow_breakdown"]
+        assert not [it for it in bd["items"] if it["source_name"] == "Employer Stock - Own Capital"], \
+            "employer deposit wrongly shown as the user's expense"
+        cash = self._asset_series(data, "Cash E")
+        c0, c1 = cash.get("2024-02-01"), cash.get("2025-02-01")
+        assert c0 is not None and c1 is not None
+        # Employer money never touches the user's bank — cash stays ~flat, not +24k/yr.
+        assert abs(c1 - c0) < 5000, f"employer deposit wrongly credited cash: {c0:.0f} -> {c1:.0f}"

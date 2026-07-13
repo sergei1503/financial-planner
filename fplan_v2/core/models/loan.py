@@ -491,12 +491,22 @@ class LoanPrimePegged(LoanFixed):
         index_change_calendar_df = self.index_tracker.get_index_change_history(EIndexType.PRIME)
         projected_df_per_period = {}
 
+        # Absolute prime level in effect at THIS loan's origination. A prime-track loan's rate
+        # tracks the prime LEVEL, so effective rate = origination rate + (current prime −
+        # origination prime). Baseline against the loan's own start — not a global single-step
+        # diff, which under-reacted to the rate cycle and dropped the first post-origination move.
+        _prior = index_change_calendar_df[index_change_calendar_df.start <= self.start_date]
+        origination_prime = (
+            float(_prior.iloc[-1]["rate"]) if not _prior.empty
+            else float(index_change_calendar_df.iloc[0]["rate"])
+        )
+
         index_change_calendar_df = index_change_calendar_df.loc[index_change_calendar_df.start > self.start_date]
         index_change_calendar_df = pd.concat(
             [
                 index_change_calendar_df,
                 pd.DataFrame(
-                    [[self.start_date, None, None, self.duration_months, 0]],
+                    [[self.start_date, None, origination_prime, self.duration_months, 0]],
                     columns=["start", "end", "rate", "duration_till_end_of_loan", "rate_change"],
                 ),
             ]
@@ -526,7 +536,8 @@ class LoanPrimePegged(LoanFixed):
                 start_value = projected_df_per_period[row_i - 1].iloc[i, projected_df.columns.get_loc(VALUE)]
 
             periods = range(1, row["duration_till_end_of_loan"] + 1)
-            rate_decimal = self.yearly_interest_rate + row["rate_change"] / 100
+            # Effective rate = loan's origination rate + cumulative prime move since origination.
+            rate_decimal = self.yearly_interest_rate + (float(row["rate"]) - origination_prime) / 100
             duration = row["duration_till_end_of_loan"]
 
             date_list = [row["start"].replace(day=1) + x * relativedelta(months=1) for x in range(duration)]
@@ -669,12 +680,18 @@ class LoanCPIPegged(LoanFixed):
         # Fill forward and extend using expected yearly CPI increase for missing future months
         if cpi_series.empty:
             raise RuntimeError("CPI series empty after processing for CPI pegged loan projection")
-        # Reindex
+        # Last month with REAL CPI data (before extending onto the projection grid).
+        last_real_date = cpi_series.index.max()
+        # ffill carries the last real value into interior gaps AND flat into the future —
+        # but future months must instead grow with the expected CPI rate.
         cpi_series = cpi_series.reindex(monthly_idx, method="ffill")
-        # For future beyond known CPI, project using expected annual increase evenly monthly
+        # For months beyond the last real CPI point, compound the expected annual increase
+        # monthly. (The previous `if pd.isna(...)` guard never fired because ffill above had
+        # already filled every gap, so expected_cpi_increase_percent_yearly was dead code and
+        # the nominal balance/payment wrongly froze after the last real CPI month.)
         monthly_inflation_factor = (1 + self.expected_cpi_increase_percent_yearly / 100) ** (1 / 12) - 1
         for d in monthly_idx:
-            if pd.isna(cpi_series.loc[d]):
+            if d > last_real_date:
                 prev = cpi_series.loc[cpi_series.index[cpi_series.index < d].max()]
                 cpi_series.loc[d] = prev * (1 + monthly_inflation_factor)
         # Compute cumulative inflation factor relative to first month

@@ -1119,7 +1119,12 @@ def compute_projection(
         for dt in all_dates:
             ts = pd.Timestamp(dt)
             matching = asset_df[asset_df["date"] == ts]
-            val = float(matching[CASH_FLOW].iloc[0]) if not matching.empty else 0.0
+            # A PensionAsset's CASH_FLOW column holds BOTH deposit contributions (negative,
+            # already accounted for as an expense/own-capital item) and the annuity payout
+            # (positive income). Only the positive payout is income here — counting the
+            # negative deposit would double-count it against the deposit item.
+            raw = float(matching[CASH_FLOW].iloc[0]) if not matching.empty else 0.0
+            val = max(0.0, raw)
             series.append(TimeSeriesDataPoint(
                 date=dt.date() if isinstance(dt, pd.Timestamp) else dt,
                 value=Decimal(str(val)),
