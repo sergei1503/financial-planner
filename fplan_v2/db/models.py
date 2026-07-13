@@ -120,7 +120,7 @@ class Asset(Base):
 
     # Constraints
     __table_args__ = (
-        UniqueConstraint("user_id", "external_id", name="uq_asset_user_external_id"),
+        UniqueConstraint("portfolio_id", "external_id", name="uq_asset_portfolio_external_id"),
         CheckConstraint(
             "asset_type IN ('real_estate', 'stock', 'pension', 'cash')",
             name="ck_asset_type",
@@ -161,7 +161,7 @@ class Loan(Base):
 
     # Constraints
     __table_args__ = (
-        UniqueConstraint("user_id", "external_id", name="uq_loan_user_external_id"),
+        UniqueConstraint("portfolio_id", "external_id", name="uq_loan_portfolio_external_id"),
         CheckConstraint(
             "loan_type IN ('fixed', 'prime_pegged', 'cpi_pegged', 'variable')",
             name="ck_loan_type",
