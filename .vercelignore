@@ -4,3 +4,6 @@ fplan_v2/frontend/.env
 __pycache__/
 *.pyc
 fplan_v2/tests/
+node_modules/
+fplan_v2/guide-video/
+fplan_v2/db/fplan.db
