@@ -21,3 +21,6 @@ fplan_v2/guide-video/
 
 # Stray local SQLite artifact (the app uses Postgres, not SQLite)
 fplan_v2/db/fplan.db
+
+# Local-only reference docs (infra/DB access, IPs, project IDs) — repo is PUBLIC, keep them off it
+*.local.md
