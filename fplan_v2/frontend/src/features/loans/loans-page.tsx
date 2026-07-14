@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, lazy, Suspense } from 'react';
 import { useTranslation } from 'react-i18next';
 import { PageContainer } from '@/components/layout/page-container';
 import { useLoans } from '@/hooks/use-loans';
@@ -6,10 +6,16 @@ import { useProjectionQuery } from '@/hooks/use-projections';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { LoanAmortizationChart } from '@/features/projections/loan-amortization-chart';
-import { LoanPaymentChart } from '@/features/projections/loan-payment-chart';
 import { LoanForm } from './loan-form';
 import { LoanList } from './loan-list';
+
+const LoanAmortizationChart = lazy(() =>
+  import('@/features/projections/loan-amortization-chart').then(m => ({ default: m.LoanAmortizationChart }))
+);
+
+const LoanPaymentChart = lazy(() =>
+  import('@/features/projections/loan-payment-chart').then(m => ({ default: m.LoanPaymentChart }))
+);
 
 export function LoansPage() {
   const { t } = useTranslation();
@@ -57,7 +63,9 @@ export function LoansPage() {
               <CardTitle>{t('projections.loan_balance_over_time')}</CardTitle>
             </CardHeader>
             <CardContent>
-              <LoanAmortizationChart loanProjections={projection!.loan_projections} />
+              <Suspense fallback={<Skeleton className="h-[300px] w-full" />}>
+                <LoanAmortizationChart loanProjections={projection!.loan_projections} />
+              </Suspense>
             </CardContent>
           </Card>
 
@@ -66,7 +74,9 @@ export function LoansPage() {
               <CardTitle>{t('projections.loan_payments_over_time')}</CardTitle>
             </CardHeader>
             <CardContent>
-              <LoanPaymentChart loanProjections={projection!.loan_projections} />
+              <Suspense fallback={<Skeleton className="h-[300px] w-full" />}>
+                <LoanPaymentChart loanProjections={projection!.loan_projections} />
+              </Suspense>
             </CardContent>
           </Card>
         </div>

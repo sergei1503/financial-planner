@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ClerkProvider, useAuth } from '@clerk/clerk-react';
 import { ClerkTokenProvider } from '@/components/clerk-token-provider';
 import { DemoProvider } from '@/contexts/demo-context';
+import { PortfolioProvider } from '@/contexts/portfolio-context';
 import App from './App';
 import './i18n';
 import './index.css';
@@ -12,8 +13,10 @@ import './index.css';
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      staleTime: 30_000,
+      staleTime: 5 * 60 * 1000, // 5 minutes
+      gcTime: 10 * 60 * 1000, // 10 minutes
       retry: 1,
+      refetchOnWindowFocus: false,
     },
   },
 });
@@ -33,9 +36,11 @@ function ClerkDemoGate({ children }: { children: React.ReactNode }) {
 const AppTree = (
   <React.StrictMode>
     <QueryClientProvider client={queryClient}>
-      <BrowserRouter>
-        <App />
-      </BrowserRouter>
+      <PortfolioProvider>
+        <BrowserRouter>
+          <App />
+        </BrowserRouter>
+      </PortfolioProvider>
     </QueryClientProvider>
   </React.StrictMode>
 );

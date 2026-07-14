@@ -71,15 +71,16 @@ class BaseRepository(Generic[ModelType]):
         """
         return self.session.query(self.model).filter(self.model.id == id).first()
 
-    def get_all(self, user_id: Optional[int] = None, limit: int = 100, offset: int = 0, eager_load: Optional[List[Any]] = None) -> List[ModelType]:
+    def get_all(self, user_id: Optional[int] = None, limit: int = 100, offset: int = 0, eager_load: Optional[List[Any]] = None, portfolio_id: Optional[int] = None) -> List[ModelType]:
         """
-        Get all records with optional user filtering, pagination, and eager loading.
+        Get all records with optional user/portfolio filtering, pagination, and eager loading.
 
         Args:
             user_id: Filter by user_id if provided
             limit: Maximum number of records to return
             offset: Number of records to skip
             eager_load: List of relationships to eager load with joinedload (e.g., [Model.relationship])
+            portfolio_id: Filter by portfolio_id if provided (scopes to a single portfolio)
 
         Returns:
             List of model instances
@@ -88,6 +89,9 @@ class BaseRepository(Generic[ModelType]):
 
         if user_id is not None and hasattr(self.model, "user_id"):
             query = query.filter(self.model.user_id == user_id)
+
+        if portfolio_id is not None and hasattr(self.model, "portfolio_id"):
+            query = query.filter(self.model.portfolio_id == portfolio_id)
 
         if eager_load:
             for relationship in eager_load:
@@ -157,12 +161,13 @@ class BaseRepository(Generic[ModelType]):
 
         return query.first() is not None
 
-    def count(self, user_id: Optional[int] = None) -> int:
+    def count(self, user_id: Optional[int] = None, portfolio_id: Optional[int] = None) -> int:
         """
         Count records.
 
         Args:
             user_id: Filter by user_id if provided
+            portfolio_id: Filter by portfolio_id if provided
 
         Returns:
             Number of records
@@ -172,9 +177,12 @@ class BaseRepository(Generic[ModelType]):
         if user_id is not None and hasattr(self.model, "user_id"):
             query = query.filter(self.model.user_id == user_id)
 
+        if portfolio_id is not None and hasattr(self.model, "portfolio_id"):
+            query = query.filter(self.model.portfolio_id == portfolio_id)
+
         return query.count()
 
-    def get_portfolio_summary_optimized(self, user_id: int) -> Dict[str, Any]:
+    def get_portfolio_summary_optimized(self, user_id: int, portfolio_id: Optional[int] = None) -> Dict[str, Any]:
         """
         Get complete portfolio summary in a single optimized SQL query.
 
@@ -187,6 +195,7 @@ class BaseRepository(Generic[ModelType]):
 
         Args:
             user_id: User ID
+            portfolio_id: If provided, scope the summary to a single portfolio
 
         Returns:
             Dictionary with all portfolio metrics
@@ -194,7 +203,9 @@ class BaseRepository(Generic[ModelType]):
         from sqlalchemy import text
         from datetime import date
 
-        query = text("""
+        portfolio_clause = " AND portfolio_id = :portfolio_id" if portfolio_id is not None else ""
+
+        query = text(f"""
             WITH asset_summary AS (
                 SELECT
                     COUNT(*) as asset_count,
@@ -205,7 +216,7 @@ class BaseRepository(Generic[ModelType]):
                         END
                     ), 0) as total_assets
                 FROM assets
-                WHERE user_id = :user_id
+                WHERE user_id = :user_id{portfolio_clause}
             ),
             loan_summary AS (
                 SELECT
@@ -234,7 +245,7 @@ class BaseRepository(Generic[ModelType]):
                         END
                     ), 0) as monthly_payments
                 FROM loans
-                WHERE user_id = :user_id
+                WHERE user_id = :user_id{portfolio_clause}
             ),
             revenue_summary AS (
                 SELECT
@@ -248,7 +259,7 @@ class BaseRepository(Generic[ModelType]):
                         END
                     ), 0) as monthly_revenue
                 FROM revenue_streams
-                WHERE user_id = :user_id
+                WHERE user_id = :user_id{portfolio_clause}
                   AND start_date <= :as_of_date
                   AND (end_date IS NULL OR end_date >= :as_of_date)
             )
@@ -265,10 +276,11 @@ class BaseRepository(Generic[ModelType]):
             CROSS JOIN revenue_summary r;
         """)
 
-        result = self.session.execute(
-            query,
-            {"user_id": user_id, "as_of_date": date.today()}
-        ).fetchone()
+        params = {"user_id": user_id, "as_of_date": date.today()}
+        if portfolio_id is not None:
+            params["portfolio_id"] = portfolio_id
+
+        result = self.session.execute(query, params).fetchone()
 
         if not result:
             return {

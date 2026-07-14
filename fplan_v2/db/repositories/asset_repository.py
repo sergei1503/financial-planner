@@ -20,39 +20,44 @@ class AssetRepository(BaseRepository[Asset]):
         """Initialize asset repository."""
         super().__init__(Asset, session)
 
-    def get_by_external_id(self, user_id: int, external_id: str) -> Optional[Asset]:
+    def get_by_external_id(self, user_id: int, external_id: str, portfolio_id: Optional[int] = None) -> Optional[Asset]:
         """
-        Get asset by user_id and external_id.
+        Get asset by user_id and external_id, optionally scoped to a portfolio.
 
         Args:
             user_id: User ID
             external_id: External identifier
+            portfolio_id: If provided, scope the lookup to this portfolio
+                (external_id is unique per portfolio, not per user)
 
         Returns:
             Asset instance or None if not found
         """
-        return (
-            self.session.query(Asset)
-            .filter(Asset.user_id == user_id, Asset.external_id == external_id)
-            .first()
+        query = self.session.query(Asset).filter(
+            Asset.user_id == user_id, Asset.external_id == external_id
         )
+        if portfolio_id is not None:
+            query = query.filter(Asset.portfolio_id == portfolio_id)
+        return query.first()
 
-    def get_by_type(self, user_id: int, asset_type: str) -> List[Asset]:
+    def get_by_type(self, user_id: int, asset_type: str, portfolio_id: Optional[int] = None) -> List[Asset]:
         """
-        Get all assets of a specific type for a user.
+        Get all assets of a specific type for a user, optionally scoped to a portfolio.
 
         Args:
             user_id: User ID
             asset_type: Asset type ('real_estate', 'stock', 'pension', 'cash')
+            portfolio_id: If provided, scope to this portfolio
 
         Returns:
             List of Asset instances
         """
-        return (
-            self.session.query(Asset)
-            .filter(Asset.user_id == user_id, Asset.asset_type == asset_type)
-            .all()
+        query = self.session.query(Asset).filter(
+            Asset.user_id == user_id, Asset.asset_type == asset_type
         )
+        if portfolio_id is not None:
+            query = query.filter(Asset.portfolio_id == portfolio_id)
+        return query.all()
 
     def get_active_assets(self, user_id: int, as_of_date: date) -> List[Asset]:
         """

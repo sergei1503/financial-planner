@@ -9,9 +9,9 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from fplan_v2.api.schemas import AssetCreate, AssetUpdate, AssetResponse
-from fplan_v2.api.auth import get_current_user
+from fplan_v2.api.auth import get_current_user, get_current_portfolio
 from fplan_v2.db.connection import get_db_session
-from fplan_v2.db.models import User
+from fplan_v2.db.models import Portfolio, User
 from fplan_v2.db.repositories import AssetRepository
 
 
@@ -22,20 +22,21 @@ router = APIRouter()
 def create_asset(
     asset: AssetCreate,
     current_user: User = Depends(get_current_user),
+    current_portfolio: Portfolio = Depends(get_current_portfolio),
     db: Session = Depends(get_db_session),
 ):
     repo = AssetRepository(db)
 
-    # Check if external_id already exists for this user
-    existing = repo.get_by_external_id(current_user.id, asset.external_id)
+    # Check if external_id already exists in this portfolio (external_id is unique per portfolio)
+    existing = repo.get_by_external_id(current_user.id, asset.external_id, portfolio_id=current_portfolio.id)
     if existing:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Asset with external_id '{asset.external_id}' already exists for this user",
+            detail=f"Asset with external_id '{asset.external_id}' already exists in this portfolio",
         )
 
     try:
-        new_asset = repo.create(user_id=current_user.id, **asset.model_dump())
+        new_asset = repo.create(user_id=current_user.id, portfolio_id=current_portfolio.id, **asset.model_dump())
         db.commit()
         db.refresh(new_asset)
         return new_asset
@@ -51,6 +52,7 @@ def create_asset(
 def get_asset(
     asset_id: int,
     current_user: User = Depends(get_current_user),
+    current_portfolio: Portfolio = Depends(get_current_portfolio),
     db: Session = Depends(get_db_session),
 ):
     repo = AssetRepository(db)
@@ -62,7 +64,7 @@ def get_asset(
             detail=f"Asset {asset_id} not found",
         )
 
-    if asset.user_id != current_user.id:
+    if asset.user_id != current_user.id or asset.portfolio_id != current_portfolio.id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not authorized to access this asset",
@@ -77,14 +79,15 @@ def list_assets(
     limit: int = 100,
     offset: int = 0,
     current_user: User = Depends(get_current_user),
+    current_portfolio: Portfolio = Depends(get_current_portfolio),
     db: Session = Depends(get_db_session),
 ):
     repo = AssetRepository(db)
 
     if asset_type:
-        assets = repo.get_by_type(current_user.id, asset_type)
+        assets = repo.get_by_type(current_user.id, asset_type, portfolio_id=current_portfolio.id)
     else:
-        assets = repo.get_all(user_id=current_user.id, limit=limit, offset=offset)
+        assets = repo.get_all(user_id=current_user.id, portfolio_id=current_portfolio.id, limit=limit, offset=offset)
 
     return assets
 
@@ -94,6 +97,7 @@ def update_asset(
     asset_id: int,
     asset_update: AssetUpdate,
     current_user: User = Depends(get_current_user),
+    current_portfolio: Portfolio = Depends(get_current_portfolio),
     db: Session = Depends(get_db_session),
 ):
     repo = AssetRepository(db)
@@ -105,7 +109,7 @@ def update_asset(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Asset {asset_id} not found",
         )
-    if existing.user_id != current_user.id:
+    if existing.user_id != current_user.id or existing.portfolio_id != current_portfolio.id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not authorized to modify this asset",
@@ -131,6 +135,7 @@ def update_asset(
 def delete_asset(
     asset_id: int,
     current_user: User = Depends(get_current_user),
+    current_portfolio: Portfolio = Depends(get_current_portfolio),
     db: Session = Depends(get_db_session),
 ):
     repo = AssetRepository(db)
@@ -142,7 +147,7 @@ def delete_asset(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Asset {asset_id} not found",
         )
-    if existing.user_id != current_user.id:
+    if existing.user_id != current_user.id or existing.portfolio_id != current_portfolio.id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not authorized to delete this asset",

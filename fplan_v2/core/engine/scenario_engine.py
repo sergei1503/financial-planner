@@ -39,7 +39,9 @@ def apply_scenario_actions(
     db_assets: list,
     db_loans: list,
     actions: List[Dict[str, Any]],
-) -> Tuple[list, list, list, list, List[Dict[str, Any]]]:
+    revenue_streams: Optional[list] = None,
+    db_revenue_streams: Optional[list] = None,
+) -> Tuple[list, list, list, list, list, list, List[Dict[str, Any]]]:
     """
     Apply scenario actions to deep copies of portfolio objects.
 
@@ -49,16 +51,21 @@ def apply_scenario_actions(
         db_assets: List of ORM Asset objects
         db_loans: List of ORM Loan objects
         actions: List of action dicts from the scenario
+        revenue_streams: Optional list of business RevenueStream objects
+        db_revenue_streams: Optional list of ORM RevenueStream objects
 
     Returns:
         Tuple of (modified_assets, modified_loans, modified_db_assets,
-                  modified_db_loans, post_projection_actions)
+                  modified_db_loans, modified_revenue_streams,
+                  modified_db_revenue_streams, post_projection_actions)
     """
     # Deep copy everything so we don't mutate the originals
     mod_assets = copy.deepcopy(assets)
     mod_loans = copy.deepcopy(loans)
     mod_db_assets = copy.deepcopy(db_assets)
     mod_db_loans = copy.deepcopy(db_loans)
+    mod_revenue_streams = copy.deepcopy(revenue_streams) if revenue_streams else []
+    mod_db_revenue_streams = copy.deepcopy(db_revenue_streams) if db_revenue_streams else []
 
     post_projection_actions = []
 
@@ -70,7 +77,8 @@ def apply_scenario_actions(
                 # Deferred param change — apply post-projection
                 post_projection_actions.append(action)
             else:
-                _apply_param_change(mod_assets, mod_loans, mod_db_assets, mod_db_loans, action)
+                _apply_param_change(mod_assets, mod_loans, mod_db_assets, mod_db_loans,
+                                  mod_revenue_streams, mod_db_revenue_streams, action)
 
         elif action_type == "new_asset":
             new_asset, new_db_asset = _apply_new_asset(action)
@@ -103,7 +111,8 @@ def apply_scenario_actions(
             # Market crash is applied post-projection
             post_projection_actions.append(action)
 
-    return mod_assets, mod_loans, mod_db_assets, mod_db_loans, post_projection_actions
+    return (mod_assets, mod_loans, mod_db_assets, mod_db_loans,
+            mod_revenue_streams, mod_db_revenue_streams, post_projection_actions)
 
 
 def apply_market_crash(
@@ -156,6 +165,8 @@ def _apply_param_change(
     loans: list,
     db_assets: list,
     db_loans: list,
+    revenue_streams: list,
+    db_revenue_streams: list,
     action: Dict[str, Any],
 ) -> None:
     """Apply a parameter change to a specific entity."""
@@ -185,6 +196,17 @@ def _apply_param_change(
                     setattr(loans[i], field, value)
                 if hasattr(db_loan, field):
                     setattr(db_loan, field, value)
+                break
+
+    elif target_type == "revenue_stream":
+        for i, db_stream in enumerate(db_revenue_streams):
+            if db_stream.id == target_id:
+                # Update the business object
+                if hasattr(revenue_streams[i], field):
+                    setattr(revenue_streams[i], field, value)
+                # Also update the ORM object for consistency
+                if hasattr(db_stream, field):
+                    setattr(db_stream, field, value)
                 break
 
 

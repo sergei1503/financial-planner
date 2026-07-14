@@ -10,9 +10,9 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from fplan_v2.api.schemas import CashFlowCreate, CashFlowUpdate, CashFlowResponse
-from fplan_v2.api.auth import get_current_user
+from fplan_v2.api.auth import get_current_user, get_current_portfolio
 from fplan_v2.db.connection import get_db_session
-from fplan_v2.db.models import User
+from fplan_v2.db.models import Portfolio, User
 from fplan_v2.db.repositories import CashFlowRepository
 
 
@@ -23,13 +23,14 @@ router = APIRouter()
 def create_cash_flow(
     cash_flow: CashFlowCreate,
     current_user: User = Depends(get_current_user),
+    current_portfolio: Portfolio = Depends(get_current_portfolio),
     db: Session = Depends(get_db_session),
 ):
     """Create a new cash flow (deposit or withdrawal)."""
     repo = CashFlowRepository(db)
 
     try:
-        new_cf = repo.create(user_id=current_user.id, **cash_flow.model_dump())
+        new_cf = repo.create(user_id=current_user.id, portfolio_id=current_portfolio.id, **cash_flow.model_dump())
         db.commit()
         db.refresh(new_cf)
         return new_cf
@@ -44,28 +45,31 @@ def create_cash_flow(
 @router.get("/", response_model=List[CashFlowResponse])
 def list_cash_flows(
     current_user: User = Depends(get_current_user),
+    current_portfolio: Portfolio = Depends(get_current_portfolio),
     db: Session = Depends(get_db_session),
 ):
-    """List all cash flows for the current user."""
+    """List all cash flows for the active portfolio."""
     repo = CashFlowRepository(db)
-    return repo.get_by_user(current_user.id)
+    return repo.get_by_user(current_user.id, portfolio_id=current_portfolio.id)
 
 
 @router.get("/asset/{asset_id}", response_model=List[CashFlowResponse])
 def get_cash_flows_by_asset(
     asset_id: int,
     current_user: User = Depends(get_current_user),
+    current_portfolio: Portfolio = Depends(get_current_portfolio),
     db: Session = Depends(get_db_session),
 ):
     """Get cash flows for a specific asset."""
     repo = CashFlowRepository(db)
-    return repo.get_by_asset(current_user.id, asset_id)
+    return repo.get_by_asset(current_user.id, asset_id, portfolio_id=current_portfolio.id)
 
 
 @router.get("/{cash_flow_id}", response_model=CashFlowResponse)
 def get_cash_flow(
     cash_flow_id: int,
     current_user: User = Depends(get_current_user),
+    current_portfolio: Portfolio = Depends(get_current_portfolio),
     db: Session = Depends(get_db_session),
 ):
     """Get a single cash flow by ID."""
@@ -78,7 +82,7 @@ def get_cash_flow(
             detail=f"Cash flow {cash_flow_id} not found",
         )
 
-    if cf.user_id != current_user.id:
+    if cf.user_id != current_user.id or cf.portfolio_id != current_portfolio.id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not authorized to access this cash flow",
@@ -92,6 +96,7 @@ def update_cash_flow(
     cash_flow_id: int,
     cash_flow_update: CashFlowUpdate,
     current_user: User = Depends(get_current_user),
+    current_portfolio: Portfolio = Depends(get_current_portfolio),
     db: Session = Depends(get_db_session),
 ):
     """Update an existing cash flow."""
@@ -103,7 +108,7 @@ def update_cash_flow(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Cash flow {cash_flow_id} not found",
         )
-    if existing.user_id != current_user.id:
+    if existing.user_id != current_user.id or existing.portfolio_id != current_portfolio.id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not authorized to modify this cash flow",
@@ -129,6 +134,7 @@ def update_cash_flow(
 def delete_cash_flow(
     cash_flow_id: int,
     current_user: User = Depends(get_current_user),
+    current_portfolio: Portfolio = Depends(get_current_portfolio),
     db: Session = Depends(get_db_session),
 ):
     """Delete a cash flow."""
@@ -140,7 +146,7 @@ def delete_cash_flow(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Cash flow {cash_flow_id} not found",
         )
-    if existing.user_id != current_user.id:
+    if existing.user_id != current_user.id or existing.portfolio_id != current_portfolio.id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not authorized to delete this cash flow",

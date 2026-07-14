@@ -14,13 +14,45 @@ export function setTokenProvider(provider: () => Promise<string | null>) {
   tokenProvider = provider;
 }
 
-// Request interceptor: attach auth token
+// Active portfolio — sent as the X-Portfolio-Id header on every request so reads/writes
+// are scoped to the selected portfolio. When null, the backend falls back to the user's
+// default portfolio. Initialized from localStorage so a returning user's first requests
+// already carry the right portfolio (the PortfolioProvider keeps it in sync thereafter).
+const PORTFOLIO_STORAGE_KEY = 'fplan.activePortfolioId';
+
+let activePortfolioId: number | null = (() => {
+  try {
+    const v = localStorage.getItem(PORTFOLIO_STORAGE_KEY);
+    return v ? Number(v) : null;
+  } catch {
+    return null;
+  }
+})();
+
+export function setActivePortfolioId(id: number | null) {
+  activePortfolioId = id;
+  try {
+    if (id == null) localStorage.removeItem(PORTFOLIO_STORAGE_KEY);
+    else localStorage.setItem(PORTFOLIO_STORAGE_KEY, String(id));
+  } catch {
+    /* localStorage unavailable — header still works for the session */
+  }
+}
+
+export function getActivePortfolioId(): number | null {
+  return activePortfolioId;
+}
+
+// Request interceptor: attach auth token + active portfolio
 apiClient.interceptors.request.use(async (config) => {
   if (tokenProvider) {
     const token = await tokenProvider();
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
+  }
+  if (activePortfolioId != null) {
+    config.headers['X-Portfolio-Id'] = String(activePortfolioId);
   }
   return config;
 });

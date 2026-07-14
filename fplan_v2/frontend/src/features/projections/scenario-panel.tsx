@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, memo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { FlaskConical, Plus, Pencil, Trash2, X, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -32,7 +32,7 @@ interface ScenarioPanelProps {
   onScenarioProjection: (data: ProjectionResponse | undefined, name?: string) => void;
 }
 
-export function ScenarioPanel({ onScenarioProjection }: ScenarioPanelProps) {
+function ScenarioPanelInner({ onScenarioProjection }: ScenarioPanelProps) {
   const { t } = useTranslation();
   const { data: scenarios } = useScenarios();
   const deleteMutation = useDeleteScenario();
@@ -208,3 +208,5 @@ export function ScenarioPanel({ onScenarioProjection }: ScenarioPanelProps) {
     </>
   );
 }
+
+export const ScenarioPanel = memo(ScenarioPanelInner);

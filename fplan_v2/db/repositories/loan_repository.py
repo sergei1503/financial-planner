@@ -20,39 +20,44 @@ class LoanRepository(BaseRepository[Loan]):
         """Initialize loan repository."""
         super().__init__(Loan, session)
 
-    def get_by_external_id(self, user_id: int, external_id: str) -> Optional[Loan]:
+    def get_by_external_id(self, user_id: int, external_id: str, portfolio_id: Optional[int] = None) -> Optional[Loan]:
         """
-        Get loan by user_id and external_id.
+        Get loan by user_id and external_id, optionally scoped to a portfolio.
 
         Args:
             user_id: User ID
             external_id: External identifier
+            portfolio_id: If provided, scope the lookup to this portfolio
+                (external_id is unique per portfolio, not per user)
 
         Returns:
             Loan instance or None if not found
         """
-        return (
-            self.session.query(Loan)
-            .filter(Loan.user_id == user_id, Loan.external_id == external_id)
-            .first()
+        query = self.session.query(Loan).filter(
+            Loan.user_id == user_id, Loan.external_id == external_id
         )
+        if portfolio_id is not None:
+            query = query.filter(Loan.portfolio_id == portfolio_id)
+        return query.first()
 
-    def get_by_type(self, user_id: int, loan_type: str) -> List[Loan]:
+    def get_by_type(self, user_id: int, loan_type: str, portfolio_id: Optional[int] = None) -> List[Loan]:
         """
-        Get all loans of a specific type for a user.
+        Get all loans of a specific type for a user, optionally scoped to a portfolio.
 
         Args:
             user_id: User ID
             loan_type: Loan type ('fixed', 'prime_pegged', 'cpi_pegged', 'variable')
+            portfolio_id: If provided, scope to this portfolio
 
         Returns:
             List of Loan instances
         """
-        return (
-            self.session.query(Loan)
-            .filter(Loan.user_id == user_id, Loan.loan_type == loan_type)
-            .all()
+        query = self.session.query(Loan).filter(
+            Loan.user_id == user_id, Loan.loan_type == loan_type
         )
+        if portfolio_id is not None:
+            query = query.filter(Loan.portfolio_id == portfolio_id)
+        return query.all()
 
     def get_active_loans(self, user_id: int, as_of_date: date) -> List[Loan]:
         """

@@ -41,22 +41,21 @@ class ScenarioRepository(BaseRepository[Scenario]):
         self.session.flush()
         return instance
 
-    def get_by_user(self, user_id: int) -> List[Scenario]:
+    def get_by_user(self, user_id: int, portfolio_id: Optional[int] = None) -> List[Scenario]:
         """
-        Get all scenarios for a user.
+        Get all scenarios for a user, optionally scoped to a portfolio.
 
         Args:
             user_id: User ID
+            portfolio_id: If provided, scope to this portfolio
 
         Returns:
             List of Scenario instances
         """
-        return (
-            self.session.query(Scenario)
-            .filter(Scenario.user_id == user_id)
-            .order_by(Scenario.updated_at.desc())
-            .all()
-        )
+        query = self.session.query(Scenario).filter(Scenario.user_id == user_id)
+        if portfolio_id is not None:
+            query = query.filter(Scenario.portfolio_id == portfolio_id)
+        return query.order_by(Scenario.updated_at.desc()).all()
 
     def get_active(self, user_id: int) -> Optional[Scenario]:
         """

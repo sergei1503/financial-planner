@@ -17,6 +17,7 @@ export function useCreateRevenueStream() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['revenue-streams'] });
       qc.invalidateQueries({ queryKey: ['portfolio-summary'] });
+      qc.invalidateQueries({ queryKey: ['projection'] });
     },
   });
 }
@@ -29,6 +30,7 @@ export function useUpdateRevenueStream() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['revenue-streams'] });
       qc.invalidateQueries({ queryKey: ['portfolio-summary'] });
+      qc.invalidateQueries({ queryKey: ['projection'] });
     },
   });
 }
@@ -40,6 +42,7 @@ export function useDeleteRevenueStream() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['revenue-streams'] });
       qc.invalidateQueries({ queryKey: ['portfolio-summary'] });
+      qc.invalidateQueries({ queryKey: ['projection'] });
     },
   });
 }

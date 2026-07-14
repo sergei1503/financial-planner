@@ -20,54 +20,60 @@ class RevenueStreamRepository(BaseRepository[RevenueStream]):
         """Initialize revenue stream repository."""
         super().__init__(RevenueStream, session)
 
-    def get_by_type(self, user_id: int, stream_type: str) -> List[RevenueStream]:
+    def get_by_type(self, user_id: int, stream_type: str, portfolio_id: Optional[int] = None) -> List[RevenueStream]:
         """
-        Get all revenue streams of a specific type for a user.
+        Get all revenue streams of a specific type for a user, optionally scoped to a portfolio.
 
         Args:
             user_id: User ID
             stream_type: Stream type ('rent', 'dividend', 'pension', 'salary')
+            portfolio_id: If provided, scope to this portfolio
 
         Returns:
             List of RevenueStream instances
         """
-        return (
-            self.session.query(RevenueStream)
-            .filter(RevenueStream.user_id == user_id, RevenueStream.stream_type == stream_type)
-            .all()
+        query = self.session.query(RevenueStream).filter(
+            RevenueStream.user_id == user_id, RevenueStream.stream_type == stream_type
         )
+        if portfolio_id is not None:
+            query = query.filter(RevenueStream.portfolio_id == portfolio_id)
+        return query.all()
 
-    def get_by_asset(self, asset_id: int) -> List[RevenueStream]:
+    def get_by_asset(self, asset_id: int, portfolio_id: Optional[int] = None) -> List[RevenueStream]:
         """
         Get all revenue streams associated with a specific asset.
 
         Args:
             asset_id: Asset ID
+            portfolio_id: If provided, scope to this portfolio (defensive; an asset
+                already belongs to exactly one portfolio)
 
         Returns:
             List of RevenueStream instances
         """
-        return (
-            self.session.query(RevenueStream)
-            .filter(RevenueStream.asset_id == asset_id)
-            .all()
-        )
+        query = self.session.query(RevenueStream).filter(RevenueStream.asset_id == asset_id)
+        if portfolio_id is not None:
+            query = query.filter(RevenueStream.portfolio_id == portfolio_id)
+        return query.all()
 
-    def get_standalone(self, user_id: int) -> List[RevenueStream]:
+    def get_standalone(self, user_id: int, portfolio_id: Optional[int] = None) -> List[RevenueStream]:
         """
-        Get all revenue streams not attached to any asset (asset_id IS NULL).
+        Get all revenue streams not attached to any asset (asset_id IS NULL),
+        optionally scoped to a portfolio.
 
         Args:
             user_id: User ID
+            portfolio_id: If provided, scope to this portfolio
 
         Returns:
             List of standalone RevenueStream instances (e.g., salary)
         """
-        return (
-            self.session.query(RevenueStream)
-            .filter(RevenueStream.user_id == user_id, RevenueStream.asset_id.is_(None))
-            .all()
+        query = self.session.query(RevenueStream).filter(
+            RevenueStream.user_id == user_id, RevenueStream.asset_id.is_(None)
         )
+        if portfolio_id is not None:
+            query = query.filter(RevenueStream.portfolio_id == portfolio_id)
+        return query.all()
 
     def get_active_streams(self, user_id: int, as_of_date: date) -> List[RevenueStream]:
         """

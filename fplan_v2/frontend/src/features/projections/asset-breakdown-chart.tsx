@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, memo } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   ComposedChart,
@@ -43,7 +43,7 @@ function formatTooltipValue(value: number) {
   }).format(value);
 }
 
-export function AssetBreakdownChart({ assetProjections, scenarioAssetProjections, scenarioName }: AssetBreakdownChartProps) {
+function AssetBreakdownChartInner({ assetProjections, scenarioAssetProjections, scenarioName }: AssetBreakdownChartProps) {
   const { t } = useTranslation();
   const [hiddenAssets, setHiddenAssets] = useState<Set<string>>(new Set());
 
@@ -245,3 +245,5 @@ export function AssetBreakdownChart({ assetProjections, scenarioAssetProjections
     </div>
   );
 }
+
+export const AssetBreakdownChart = memo(AssetBreakdownChartInner);

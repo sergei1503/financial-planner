@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   ComposedChart,
@@ -45,7 +46,7 @@ function formatTooltipValue(value: number) {
   }).format(value);
 }
 
-export function NetWorthChart({
+function NetWorthChartInner({
   netWorth,
   totalAssets,
   totalLiabilities,
@@ -231,3 +232,5 @@ export function NetWorthChart({
     </ResponsiveContainer>
   );
 }
+
+export const NetWorthChart = memo(NetWorthChartInner);

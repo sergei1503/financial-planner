@@ -20,6 +20,7 @@ export function useCreateCashFlow() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['cash-flows'] });
       qc.invalidateQueries({ queryKey: ['portfolio-summary'] });
+      qc.invalidateQueries({ queryKey: ['projection'] });
     },
   });
 }
@@ -32,6 +33,7 @@ export function useUpdateCashFlow() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['cash-flows'] });
       qc.invalidateQueries({ queryKey: ['portfolio-summary'] });
+      qc.invalidateQueries({ queryKey: ['projection'] });
     },
   });
 }
@@ -43,6 +45,7 @@ export function useDeleteCashFlow() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['cash-flows'] });
       qc.invalidateQueries({ queryKey: ['portfolio-summary'] });
+      qc.invalidateQueries({ queryKey: ['projection'] });
     },
   });
 }

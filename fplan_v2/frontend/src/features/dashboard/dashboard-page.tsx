@@ -5,6 +5,8 @@ import { formatCurrency } from '@/lib/formatters';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
+import { GuideVideoDialog } from '@/components/guide-video-dialog';
+import { useGuideVideo } from '@/hooks/use-guide-video';
 
 function KpiCard({
   title,
@@ -50,6 +52,7 @@ function StatCard({ title, value }: { title: string; value: number }) {
 export function DashboardPage() {
   const { t } = useTranslation();
   const { data, isLoading, isError, refetch } = usePortfolioSummary();
+  const [showGuide, setShowGuide] = useGuideVideo();
 
   if (isLoading) {
     return (
@@ -96,39 +99,42 @@ export function DashboardPage() {
   }
 
   return (
-    <PageContainer title={t('nav.dashboard')}>
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <KpiCard
-          title={t('dashboard.net_worth')}
-          value={formatCurrency(data.net_worth)}
-          colorClass="text-primary"
-        />
-        <KpiCard
-          title={t('dashboard.total_assets')}
-          value={formatCurrency(data.total_assets)}
-          colorClass="text-green-600"
-        />
-        <KpiCard
-          title={t('dashboard.total_liabilities')}
-          value={formatCurrency(data.total_liabilities)}
-          colorClass="text-red-600"
-        />
-        <KpiCard
-          title={t('dashboard.monthly_cash_flow')}
-          value={formatCurrency(data.monthly_net_cash_flow)}
-          colorClass="text-blue-600"
-        />
-      </div>
+    <>
+      <PageContainer title={t('nav.dashboard')}>
+        <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+          <KpiCard
+            title={t('dashboard.net_worth')}
+            value={formatCurrency(data.net_worth)}
+            colorClass="text-primary"
+          />
+          <KpiCard
+            title={t('dashboard.total_assets')}
+            value={formatCurrency(data.total_assets)}
+            colorClass="text-green-600"
+          />
+          <KpiCard
+            title={t('dashboard.total_liabilities')}
+            value={formatCurrency(data.total_liabilities)}
+            colorClass="text-red-600"
+          />
+          <KpiCard
+            title={t('dashboard.monthly_cash_flow')}
+            value={formatCurrency(data.monthly_net_cash_flow)}
+            colorClass="text-blue-600"
+          />
+        </div>
 
-      <div className="mt-6 grid grid-cols-3 gap-4">
-        <StatCard title={t('dashboard.asset_count')} value={data.asset_count} />
-        <StatCard title={t('dashboard.loan_count')} value={data.loan_count} />
-        <StatCard
-          title={t('dashboard.revenue_stream_count')}
-          value={data.revenue_stream_count}
-        />
-      </div>
+        <div className="mt-6 grid grid-cols-3 gap-4">
+          <StatCard title={t('dashboard.asset_count')} value={data.asset_count} />
+          <StatCard title={t('dashboard.loan_count')} value={data.loan_count} />
+          <StatCard
+            title={t('dashboard.revenue_stream_count')}
+            value={data.revenue_stream_count}
+          />
+        </div>
 
-    </PageContainer>
+      </PageContainer>
+      <GuideVideoDialog open={showGuide} onOpenChange={setShowGuide} />
+    </>
   );
 }

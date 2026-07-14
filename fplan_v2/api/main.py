@@ -24,7 +24,7 @@ from sqlalchemy.orm import Session
 logger = logging.getLogger("fplan")
 
 from fplan_v2.db.connection import get_engine, init_db, get_db_session
-from fplan_v2.api.routes import assets, loans, revenue_streams, projections, historical_measurements, cash_flows, demo, scenarios
+from fplan_v2.api.routes import assets, loans, revenue_streams, projections, historical_measurements, cash_flows, demo, scenarios, portfolios
 
 
 @asynccontextmanager
@@ -128,6 +128,7 @@ app.include_router(historical_measurements.router, prefix="/api/historical-measu
 app.include_router(cash_flows.router, prefix="/api/cash-flows", tags=["Cash Flows"])
 app.include_router(demo.router, prefix="/api/demo", tags=["Demo"])
 app.include_router(scenarios.router, prefix="/api/scenarios", tags=["Scenarios"])
+app.include_router(portfolios.router, prefix="/api/portfolios", tags=["Portfolios"])
 
 
 # Root endpoint

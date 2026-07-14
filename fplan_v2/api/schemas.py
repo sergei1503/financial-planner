@@ -378,6 +378,34 @@ class PortfolioSummary(BaseSchema):
 
 
 # ======================
+# Portfolio Schemas
+# ======================
+
+
+class PortfolioCreate(BaseSchema):
+    """Schema for creating a new portfolio."""
+
+    name: str = Field(..., min_length=1, max_length=255)
+
+
+class PortfolioUpdate(BaseSchema):
+    """Schema for renaming a portfolio."""
+
+    name: Optional[str] = Field(None, min_length=1, max_length=255)
+
+
+class PortfolioResponse(BaseSchema):
+    """Schema for portfolio responses."""
+
+    id: int
+    user_id: int
+    name: str
+    is_default: bool
+    created_at: datetime
+    updated_at: datetime
+
+
+# ======================
 # Historical Measurement Schemas
 # ======================
 

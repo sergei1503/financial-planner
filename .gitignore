@@ -12,3 +12,12 @@ venv/
 .vscode/
 *.egg-info/
 .vercel
+
+# Personal baseline portfolio configs — NEVER commit (real financial data; repo is public)
+data/configs/
+
+# Guide-video generation tool — raw working dir (~400 MB, its own node_modules/out)
+fplan_v2/guide-video/
+
+# Stray local SQLite artifact (the app uses Postgres, not SQLite)
+fplan_v2/db/fplan.db

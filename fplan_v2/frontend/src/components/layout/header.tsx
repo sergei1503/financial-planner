@@ -2,9 +2,11 @@ import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router-dom';
 import { UserButton } from '@clerk/clerk-react';
-import { Moon, Sun, LogIn } from 'lucide-react';
+import { Moon, Sun, LogIn, HelpCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useDemoMode } from '@/contexts/demo-context';
+import { GuideVideoDialog } from '@/components/guide-video-dialog';
+import { PortfolioSwitcher } from '@/components/portfolio-switcher';
 
 const clerkEnabled = !!import.meta.env.VITE_CLERK_PUBLISHABLE_KEY;
 
@@ -14,6 +16,7 @@ export function Header() {
   const [dark, setDark] = useState(() =>
     document.documentElement.classList.contains('dark')
   );
+  const [showGuide, setShowGuide] = useState(false);
 
   const toggleLanguage = () => {
     const newLang = i18n.language === 'he' ? 'en' : 'he';
@@ -31,30 +34,42 @@ export function Header() {
   }, [dark]);
 
   return (
-    <header className="flex items-center justify-between border-b px-6 py-3">
-      <h1 className="text-lg font-semibold">{t('app.title')}</h1>
-      <div className="flex items-center gap-2">
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={() => setDark(d => !d)}
-          aria-label="Toggle theme"
-        >
-          {dark ? <Sun className="size-4" /> : <Moon className="size-4" />}
-        </Button>
-        <Button variant="outline" size="sm" onClick={toggleLanguage}>
-          {i18n.language === 'he' ? 'EN' : '\u05E2\u05D1'}
-        </Button>
-        {clerkEnabled && isDemo && (
-          <Button variant="default" size="sm" asChild>
-            <Link to="/sign-in">
-              <LogIn className="me-1 size-4" />
-              {t('demo.sign_in')}
-            </Link>
+    <>
+      <header className="flex items-center justify-between border-b px-6 py-3">
+        <h1 className="text-lg font-semibold">{t('app.title')}</h1>
+        <div className="flex items-center gap-2">
+          <PortfolioSwitcher />
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => setShowGuide(true)}
+            aria-label={t('guide.open_guide')}
+          >
+            <HelpCircle className="size-4" />
           </Button>
-        )}
-        {clerkEnabled && !isDemo && <div dir="ltr"><UserButton afterSignOutUrl="/" /></div>}
-      </div>
-    </header>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => setDark(d => !d)}
+            aria-label="Toggle theme"
+          >
+            {dark ? <Sun className="size-4" /> : <Moon className="size-4" />}
+          </Button>
+          <Button variant="outline" size="sm" onClick={toggleLanguage}>
+            {i18n.language === 'he' ? 'EN' : '\u05E2\u05D1'}
+          </Button>
+          {clerkEnabled && isDemo && (
+            <Button variant="default" size="sm" asChild>
+              <Link to="/sign-in">
+                <LogIn className="me-1 size-4" />
+                {t('demo.sign_in')}
+              </Link>
+            </Button>
+          )}
+          {clerkEnabled && !isDemo && <div dir="ltr"><UserButton afterSignOutUrl="/" /></div>}
+        </div>
+      </header>
+      <GuideVideoDialog open={showGuide} onOpenChange={setShowGuide} />
+    </>
   );
 }

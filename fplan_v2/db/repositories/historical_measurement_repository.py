@@ -25,6 +25,7 @@ class HistoricalMeasurementRepository(BaseRepository[HistoricalMeasurement]):
         user_id: int,
         entity_type: str,
         entity_id: int,
+        portfolio_id: Optional[int] = None,
     ) -> List[HistoricalMeasurement]:
         """
         Get all measurements for a specific entity, ordered by date.
@@ -33,20 +34,19 @@ class HistoricalMeasurementRepository(BaseRepository[HistoricalMeasurement]):
             user_id: User ID
             entity_type: 'asset' or 'loan'
             entity_id: ID of the asset or loan
+            portfolio_id: If provided, scope to this portfolio
 
         Returns:
             List of HistoricalMeasurement instances ordered by measurement_date
         """
-        return (
-            self.session.query(HistoricalMeasurement)
-            .filter(
-                HistoricalMeasurement.user_id == user_id,
-                HistoricalMeasurement.entity_type == entity_type,
-                HistoricalMeasurement.entity_id == entity_id,
-            )
-            .order_by(HistoricalMeasurement.measurement_date)
-            .all()
+        query = self.session.query(HistoricalMeasurement).filter(
+            HistoricalMeasurement.user_id == user_id,
+            HistoricalMeasurement.entity_type == entity_type,
+            HistoricalMeasurement.entity_id == entity_id,
         )
+        if portfolio_id is not None:
+            query = query.filter(HistoricalMeasurement.portfolio_id == portfolio_id)
+        return query.order_by(HistoricalMeasurement.measurement_date).all()
 
     def get_by_date_range(
         self,

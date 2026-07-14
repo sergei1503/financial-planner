@@ -346,3 +346,12 @@ export interface ErrorResponse {
   detail?: string;
   type?: string;
 }
+
+export interface Portfolio {
+  id: number;
+  user_id: number;
+  name: string;
+  is_default: boolean;
+  created_at: string;
+  updated_at: string;
+}

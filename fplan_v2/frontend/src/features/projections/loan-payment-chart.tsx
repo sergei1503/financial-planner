@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   BarChart,
@@ -45,7 +46,7 @@ function formatTooltipValue(value: number) {
   }).format(value);
 }
 
-export function LoanPaymentChart({ loanProjections, scenarioLoanProjections, scenarioName }: LoanPaymentChartProps) {
+function LoanPaymentChartInner({ loanProjections, scenarioLoanProjections, scenarioName }: LoanPaymentChartProps) {
   const { t } = useTranslation();
 
   if (loanProjections.length === 0) return null;
@@ -114,3 +115,5 @@ export function LoanPaymentChart({ loanProjections, scenarioLoanProjections, sce
     </ResponsiveContainer>
   );
 }
+
+export const LoanPaymentChart = memo(LoanPaymentChartInner);

@@ -1,16 +1,19 @@
-import { useState } from 'react';
+import { useState, lazy, Suspense } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Plus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { PageContainer } from '@/components/layout/page-container';
-import { CashFlowChart } from '@/features/projections/cash-flow-chart';
 import { useProjectionQuery } from '@/hooks/use-projections';
 import { useRevenueStreams } from '@/hooks/use-revenue-streams';
 import { useCashFlows } from '@/hooks/use-cash-flows';
 import { UnifiedCashFlowTable } from './unified-cash-flow-table';
 import { RevenueStreamForm } from './revenue-stream-form';
 import { CashFlowForm } from './cash-flow-form';
+
+const CashFlowChart = lazy(() =>
+  import('@/features/projections/cash-flow-chart').then(m => ({ default: m.CashFlowChart }))
+);
 
 export function CashFlowsPage() {
   const { t } = useTranslation();
@@ -41,10 +44,12 @@ export function CashFlowsPage() {
             <h3 className="text-lg font-semibold mb-4">
               {t('charts.cash_flow_over_time')}
             </h3>
-            <CashFlowChart
-              data={projection.monthly_cash_flow_series}
-              breakdown={projection.cash_flow_breakdown}
-            />
+            <Suspense fallback={<Skeleton className="h-[300px] w-full" />}>
+              <CashFlowChart
+                data={projection.monthly_cash_flow_series}
+                breakdown={projection.cash_flow_breakdown}
+              />
+            </Suspense>
           </div>
         ) : null}
 

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, lazy, Suspense } from 'react';
 import { useTranslation } from 'react-i18next';
 import { PageContainer } from '@/components/layout/page-container';
 import { useAssets } from '@/hooks/use-assets';
@@ -6,9 +6,12 @@ import { useProjectionQuery } from '@/hooks/use-projections';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { AssetBreakdownChart } from '@/features/projections/asset-breakdown-chart';
 import { AssetForm } from './asset-form';
 import { AssetList } from './asset-list';
+
+const AssetBreakdownChart = lazy(() =>
+  import('@/features/projections/asset-breakdown-chart').then(m => ({ default: m.AssetBreakdownChart }))
+);
 
 export function AssetsPage() {
   const { t } = useTranslation();
@@ -53,7 +56,9 @@ export function AssetsPage() {
             <CardTitle>{t('projections.asset_breakdown')}</CardTitle>
           </CardHeader>
           <CardContent>
-            <AssetBreakdownChart assetProjections={projection.asset_projections} />
+            <Suspense fallback={<Skeleton className="h-[300px] w-full" />}>
+              <AssetBreakdownChart assetProjections={projection.asset_projections} />
+            </Suspense>
           </CardContent>
         </Card>
       )}

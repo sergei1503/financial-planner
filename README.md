@@ -84,14 +84,21 @@ python -m fplan_v2.scripts.seed_dev_data
 ### 4. Run
 
 ```bash
-# Backend (terminal 1)
-uvicorn fplan_v2.api.main:app --reload --port 8000
+# Backend (terminal 1) — port must match the frontend's VITE_API_URL
+uvicorn fplan_v2.api.main:app --reload --port 8034
 
-# Frontend (terminal 2)
+# Frontend (terminal 2) — Vite is pinned to port 3034 (see vite.config.ts)
 cd fplan_v2/frontend && npm run dev
 ```
 
-Open http://localhost:5173 — you're in.
+Open http://localhost:3034 — you're in.
+
+> **Ports:** the dev setup is wired to **backend `:8034`** and **frontend `:3034`** — the frontend's
+> `VITE_API_URL` defaults to `http://localhost:8034`, and `vite.config.ts` pins the dev server to `3034`.
+> If you change one, change the other.
+>
+> **Single-user mode:** with no Clerk keys, every request maps to **`user_id = 1`**. Seed or import
+> your portfolio onto user 1 to see it locally.
 
 ### Using Docker for PostgreSQL
 
@@ -123,7 +130,7 @@ docker run -d --name fplan-db \
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `VITE_API_URL` | No | API base URL (default: `http://localhost:8000` for dev, same origin in prod) |
+| `VITE_API_URL` | No | API base URL (default: `http://localhost:8034` for dev, same origin in prod) |
 | `VITE_CLERK_PUBLISHABLE_KEY` | No | Clerk publishable key. Omit to skip auth entirely. |
 
 ## Architecture
@@ -169,6 +176,24 @@ To enable demo mode with Clerk, seed the demo user:
 ```bash
 python -m fplan_v2.scripts.seed_demo_data
 ```
+
+## History & migrating from v1
+
+This is **v2** — a React + FastAPI rewrite of an earlier **Streamlit** prototype (repo `fplan`).
+v1 stored portfolios as JSON/YAML config files; v2 is database-backed (one row per asset/loan,
+plus a `historical_measurements` table for logged actual values).
+
+A migration script imports a v1 config (its `asset_list` / `loan_list` / per-asset `history`) into
+the v2 database for a given user:
+
+```bash
+python -m fplan_v2.migrations.migrate_from_v1 --config path/to/v1_config.json --user-id 1
+```
+
+Notes:
+- The importer needs the v1 parser from the old `fplan` repo (`backend/`) on `PYTHONPATH`.
+- Reset the target user's portfolio first if it already has data, to avoid duplicate rows.
+- `--dry-run` has a known summary-printer bug; the real (non-dry) run is correct and de-duplicates.
 
 ## License
 

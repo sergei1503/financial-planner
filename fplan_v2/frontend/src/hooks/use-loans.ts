@@ -20,6 +20,7 @@ export function useCreateLoan() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['loans'] });
       qc.invalidateQueries({ queryKey: ['portfolio-summary'] });
+      qc.invalidateQueries({ queryKey: ['projection'] });
     },
   });
 }
@@ -32,6 +33,7 @@ export function useUpdateLoan() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['loans'] });
       qc.invalidateQueries({ queryKey: ['portfolio-summary'] });
+      qc.invalidateQueries({ queryKey: ['projection'] });
     },
   });
 }
@@ -43,6 +45,7 @@ export function useDeleteLoan() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['loans'] });
       qc.invalidateQueries({ queryKey: ['portfolio-summary'] });
+      qc.invalidateQueries({ queryKey: ['projection'] });
     },
   });
 }

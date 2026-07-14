@@ -9,9 +9,9 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from fplan_v2.api.schemas import RevenueStreamCreate, RevenueStreamUpdate, RevenueStreamResponse
-from fplan_v2.api.auth import get_current_user
+from fplan_v2.api.auth import get_current_user, get_current_portfolio
 from fplan_v2.db.connection import get_db_session
-from fplan_v2.db.models import User
+from fplan_v2.db.models import Portfolio, User
 from fplan_v2.db.repositories import RevenueStreamRepository
 
 
@@ -22,12 +22,13 @@ router = APIRouter()
 def create_revenue_stream(
     stream: RevenueStreamCreate,
     current_user: User = Depends(get_current_user),
+    current_portfolio: Portfolio = Depends(get_current_portfolio),
     db: Session = Depends(get_db_session),
 ):
     repo = RevenueStreamRepository(db)
 
     try:
-        new_stream = repo.create(user_id=current_user.id, **stream.model_dump())
+        new_stream = repo.create(user_id=current_user.id, portfolio_id=current_portfolio.id, **stream.model_dump())
         db.commit()
         db.refresh(new_stream)
         return new_stream
@@ -43,6 +44,7 @@ def create_revenue_stream(
 def get_revenue_stream(
     stream_id: int,
     current_user: User = Depends(get_current_user),
+    current_portfolio: Portfolio = Depends(get_current_portfolio),
     db: Session = Depends(get_db_session),
 ):
     repo = RevenueStreamRepository(db)
@@ -54,7 +56,7 @@ def get_revenue_stream(
             detail=f"Revenue stream {stream_id} not found",
         )
 
-    if stream.user_id != current_user.id:
+    if stream.user_id != current_user.id or stream.portfolio_id != current_portfolio.id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not authorized to access this revenue stream",
@@ -70,16 +72,17 @@ def list_revenue_streams(
     limit: int = 100,
     offset: int = 0,
     current_user: User = Depends(get_current_user),
+    current_portfolio: Portfolio = Depends(get_current_portfolio),
     db: Session = Depends(get_db_session),
 ):
     repo = RevenueStreamRepository(db)
 
     if stream_type:
-        streams = repo.get_by_type(current_user.id, stream_type)
+        streams = repo.get_by_type(current_user.id, stream_type, portfolio_id=current_portfolio.id)
     elif asset_id:
-        streams = repo.get_by_asset(asset_id)
+        streams = repo.get_by_asset(asset_id, portfolio_id=current_portfolio.id)
     else:
-        streams = repo.get_all(user_id=current_user.id, limit=limit, offset=offset)
+        streams = repo.get_all(user_id=current_user.id, portfolio_id=current_portfolio.id, limit=limit, offset=offset)
 
     return streams
 
@@ -89,6 +92,7 @@ def update_revenue_stream(
     stream_id: int,
     stream_update: RevenueStreamUpdate,
     current_user: User = Depends(get_current_user),
+    current_portfolio: Portfolio = Depends(get_current_portfolio),
     db: Session = Depends(get_db_session),
 ):
     repo = RevenueStreamRepository(db)
@@ -99,7 +103,7 @@ def update_revenue_stream(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Revenue stream {stream_id} not found",
         )
-    if existing.user_id != current_user.id:
+    if existing.user_id != current_user.id or existing.portfolio_id != current_portfolio.id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not authorized to modify this revenue stream",
@@ -125,6 +129,7 @@ def update_revenue_stream(
 def delete_revenue_stream(
     stream_id: int,
     current_user: User = Depends(get_current_user),
+    current_portfolio: Portfolio = Depends(get_current_portfolio),
     db: Session = Depends(get_db_session),
 ):
     repo = RevenueStreamRepository(db)
@@ -135,7 +140,7 @@ def delete_revenue_stream(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Revenue stream {stream_id} not found",
         )
-    if existing.user_id != current_user.id:
+    if existing.user_id != current_user.id or existing.portfolio_id != current_portfolio.id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not authorized to delete this revenue stream",

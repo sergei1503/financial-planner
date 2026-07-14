@@ -29,9 +29,9 @@ from fplan_v2.api.schemas import (
     CashFlowItem,
     CashFlowBreakdown,
 )
-from fplan_v2.api.auth import get_current_user
+from fplan_v2.api.auth import get_current_user, get_current_portfolio
 from fplan_v2.db.connection import get_db_session
-from fplan_v2.db.models import User
+from fplan_v2.db.models import Portfolio, User
 from fplan_v2.db.repositories import AssetRepository, LoanRepository, RevenueStreamRepository, CashFlowRepository, HistoricalMeasurementRepository
 from fplan_v2.db import models
 
@@ -397,7 +397,7 @@ def _apply_cash_conversions(
 
 
 def _project_standalone_revenue_streams(
-    db: Session, user_id: int, all_dates: list,
+    db: Session, user_id: int, all_dates: list, portfolio_id: int = None,
 ) -> List[CashFlowItem]:
     """
     Project standalone revenue streams (not attached to any asset, e.g. salary).
@@ -405,7 +405,7 @@ def _project_standalone_revenue_streams(
     Returns a list of CashFlowItem objects for the breakdown.
     """
     revenue_repo = RevenueStreamRepository(db)
-    standalone_streams = revenue_repo.get_standalone(user_id)
+    standalone_streams = revenue_repo.get_standalone(user_id, portfolio_id=portfolio_id)
     items: List[CashFlowItem] = []
 
     for db_stream in standalone_streams:
@@ -494,7 +494,7 @@ def _project_standalone_revenue_streams(
 
 
 def _project_standalone_cash_flows(
-    db: Session, user_id: int, all_dates: list,
+    db: Session, user_id: int, all_dates: list, portfolio_id: int = None,
 ) -> List[CashFlowItem]:
     """
     Project standalone cash flows (not attached to any asset).
@@ -505,7 +505,7 @@ def _project_standalone_cash_flows(
     Returns a list of CashFlowItem objects for the breakdown.
     """
     repo = CashFlowRepository(db)
-    all_cfs = repo.get_by_user(user_id)
+    all_cfs = repo.get_by_user(user_id, portfolio_id=portfolio_id)
     standalone_cfs = [cf for cf in all_cfs if cf.target_asset_id is None]
 
     items: List[CashFlowItem] = []
@@ -721,9 +721,9 @@ def _apply_measurement_shifts(
     return asset_markers, loan_markers
 
 
-def _build_cache_key(user: User, start_date: date, end_date: date, as_of_date: date = None) -> str:
-    """Build a SHA-256 cache key from portfolio version and actual dates used."""
-    key_data = f"{user.portfolio_version}:{start_date}:{end_date}:{as_of_date}"
+def _build_cache_key(user: User, start_date: date, end_date: date, as_of_date: date = None, portfolio_id: int = None) -> str:
+    """Build a SHA-256 cache key from portfolio id, portfolio version and actual dates used."""
+    key_data = f"{portfolio_id}:{user.portfolio_version}:{start_date}:{end_date}:{as_of_date}"
     return hashlib.sha256(key_data.encode()).hexdigest()
 
 
@@ -763,6 +763,7 @@ def compute_projection(
     user_id: int,
     is_historical: bool = False,
     historical_as_of_date: date = None,
+    portfolio_id: int = None,
 ) -> ProjectionResponse:
     """
     Core projection pipeline: takes business objects and runs the full projection.
@@ -1138,12 +1139,12 @@ def compute_projection(
             entity_type="asset",
         ))
 
-    # Standalone revenue streams (salary, rent not attached to assets)
-    standalone_items = _project_standalone_revenue_streams(db, user_id, all_dates)
+    # Standalone revenue streams (salary, rent not attached to assets) — scoped to the portfolio
+    standalone_items = _project_standalone_revenue_streams(db, user_id, all_dates, portfolio_id=portfolio_id)
     breakdown_revenue_items.extend(standalone_items)
 
-    # Standalone cash flows (expenditures/incomes not attached to any asset)
-    standalone_cf_items = _project_standalone_cash_flows(db, user_id, all_dates)
+    # Standalone cash flows (expenditures/incomes not attached to any asset) — scoped to the portfolio
+    standalone_cf_items = _project_standalone_cash_flows(db, user_id, all_dates, portfolio_id=portfolio_id)
     breakdown_asset_cf_items.extend(standalone_cf_items)
 
     cash_flow_breakdown = _build_cash_flow_breakdown(
@@ -1214,6 +1215,7 @@ def compute_projection(
 def run_projection(
     request: ProjectionRequest,
     current_user: User = Depends(get_current_user),
+    current_portfolio: Portfolio = Depends(get_current_portfolio),
     db: Session = Depends(get_db_session),
 ):
     """
@@ -1256,8 +1258,8 @@ def run_projection(
         )
 
     # Check projection cache using actual transformed dates
-    logger.info(f"[CACHE] Building cache key for user_id={current_user.id}, start={start_date}, end={end_date}, as_of={historical_as_of_date}")
-    cache_key = _build_cache_key(current_user, start_date, end_date, historical_as_of_date)
+    logger.info(f"[CACHE] Building cache key for user_id={current_user.id}, portfolio_id={current_portfolio.id}, start={start_date}, end={end_date}, as_of={historical_as_of_date}")
+    cache_key = _build_cache_key(current_user, start_date, end_date, historical_as_of_date, portfolio_id=current_portfolio.id)
     logger.info(f"[CACHE] Generated cache_key: {cache_key}")
 
     cached = _get_cached_projection(db, current_user.id, cache_key)
@@ -1276,11 +1278,13 @@ def run_projection(
     from fplan_v2.db.models import Asset as AssetModel, Loan as LoanModel
     db_assets = asset_repo.get_all(
         user_id=current_user.id,
+        portfolio_id=current_portfolio.id,
         limit=1000,
         eager_load=[AssetModel.revenue_streams, AssetModel.cash_flows]
     )
     db_loans = loan_repo.get_all(
         user_id=current_user.id,
+        portfolio_id=current_portfolio.id,
         limit=1000,
         eager_load=[LoanModel.collateral_asset]
     )
@@ -1288,11 +1292,11 @@ def run_projection(
     # Load historical measurements - filter by as_of_date if in historical mode
     if is_historical:
         all_measurements = [
-            m for m in measurement_repo.get_all(user_id=current_user.id)
+            m for m in measurement_repo.get_all(user_id=current_user.id, portfolio_id=current_portfolio.id)
             if m.measurement_date <= historical_as_of_date
         ]
     else:
-        all_measurements = measurement_repo.get_all(user_id=current_user.id)
+        all_measurements = measurement_repo.get_all(user_id=current_user.id, portfolio_id=current_portfolio.id)
 
     if not db_assets and not db_loans:
         return ProjectionResponse(
@@ -1331,6 +1335,7 @@ def run_projection(
             months_to_project=months_to_project,
             db=db,
             user_id=current_user.id,
+            portfolio_id=current_portfolio.id,
             is_historical=is_historical,
             historical_as_of_date=historical_as_of_date,
         )
@@ -1352,12 +1357,13 @@ def run_projection(
 @router.get("/portfolio/summary", response_model=PortfolioSummary)
 def get_portfolio_summary(
     current_user: User = Depends(get_current_user),
+    current_portfolio: Portfolio = Depends(get_current_portfolio),
     db: Session = Depends(get_db_session),
 ):
     """
     Get current portfolio summary statistics.
 
-    Calculates current state of user's portfolio including:
+    Calculates current state of the active portfolio including:
     - Total assets
     - Total liabilities
     - Net worth
@@ -1370,7 +1376,7 @@ def get_portfolio_summary(
     # Use optimized single-query method from BaseRepository
     from fplan_v2.db.repositories.base import BaseRepository
     base_repo = BaseRepository(User, db)
-    summary = base_repo.get_portfolio_summary_optimized(user_id)
+    summary = base_repo.get_portfolio_summary_optimized(user_id, portfolio_id=current_portfolio.id)
 
     # Calculate derived values
     total_assets = summary["total_assets"]

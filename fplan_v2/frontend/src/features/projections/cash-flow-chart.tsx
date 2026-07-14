@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useCallback, useMemo, memo } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   ComposedChart,
@@ -42,7 +42,7 @@ function formatTooltipValue(value: number) {
   }).format(value);
 }
 
-export function CashFlowChart({ data, breakdown, scenarioBreakdown, scenarioName }: CashFlowChartProps) {
+function CashFlowChartInner({ data, breakdown, scenarioBreakdown, scenarioName }: CashFlowChartProps) {
   const { t } = useTranslation();
   const [hiddenSeries, setHiddenSeries] = useState<Set<string>>(new Set());
 
@@ -222,3 +222,5 @@ export function CashFlowChart({ data, breakdown, scenarioBreakdown, scenarioName
     </div>
   );
 }
+
+export const CashFlowChart = memo(CashFlowChartInner);

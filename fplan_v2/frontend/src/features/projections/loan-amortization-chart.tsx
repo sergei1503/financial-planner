@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, memo } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   ComposedChart,
@@ -42,7 +42,7 @@ function formatTooltipValue(value: number) {
   }).format(value);
 }
 
-export function LoanAmortizationChart({ loanProjections, scenarioLoanProjections, scenarioName }: LoanAmortizationChartProps) {
+function LoanAmortizationChartInner({ loanProjections, scenarioLoanProjections, scenarioName }: LoanAmortizationChartProps) {
   const { t } = useTranslation();
   const [hiddenLoans, setHiddenLoans] = useState<Set<string>>(new Set());
 
@@ -216,3 +216,5 @@ export function LoanAmortizationChart({ loanProjections, scenarioLoanProjections
     </div>
   );
 }
+
+export const LoanAmortizationChart = memo(LoanAmortizationChartInner);

@@ -13,14 +13,14 @@ from typing import Optional
 
 import jwt
 from jwt import PyJWKClient
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, Header, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 
 logger = logging.getLogger("fplan.auth")
 
 from fplan_v2.db.connection import get_db_session
-from fplan_v2.db.models import User
+from fplan_v2.db.models import Portfolio, User
 
 
 # Clerk configuration from environment
@@ -176,3 +176,44 @@ async def get_current_user(
 def is_demo_user(user: User) -> bool:
     """Check if the given user is the demo user."""
     return user.clerk_id == DEMO_CLERK_ID
+
+
+def get_current_portfolio(
+    x_portfolio_id: Optional[int] = Header(default=None, alias="X-Portfolio-Id"),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db_session),
+) -> Portfolio:
+    """
+    FastAPI dependency that resolves the active portfolio for the request.
+
+    Resolution order:
+    1. If the ``X-Portfolio-Id`` header is present, use that portfolio — but only if
+       it belongs to the current user (404 otherwise, so one user can't probe another's).
+    2. Otherwise fall back to the user's default portfolio.
+    3. As a last resort (a user with no portfolios yet — e.g. a freshly auto-created
+       Clerk user), create a default portfolio on the fly.
+
+    Every entity route depends on this so reads/writes are scoped to a single portfolio.
+    """
+    query = db.query(Portfolio).filter(Portfolio.user_id == current_user.id)
+
+    if x_portfolio_id is not None:
+        portfolio = query.filter(Portfolio.id == x_portfolio_id).first()
+        if portfolio is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Portfolio {x_portfolio_id} not found",
+            )
+        return portfolio
+
+    portfolio = (
+        query.filter(Portfolio.is_default.is_(True)).order_by(Portfolio.id).first()
+        or query.order_by(Portfolio.id).first()
+    )
+    if portfolio is None:
+        # Defensive: user has no portfolio yet. Create their default one.
+        portfolio = Portfolio(user_id=current_user.id, name="My Portfolio", is_default=True)
+        db.add(portfolio)
+        db.commit()
+        db.refresh(portfolio)
+    return portfolio

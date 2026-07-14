@@ -20,6 +20,7 @@ export function useCreateAsset() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['assets'] });
       qc.invalidateQueries({ queryKey: ['portfolio-summary'] });
+      qc.invalidateQueries({ queryKey: ['projection'] });
     },
   });
 }
@@ -32,6 +33,7 @@ export function useUpdateAsset() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['assets'] });
       qc.invalidateQueries({ queryKey: ['portfolio-summary'] });
+      qc.invalidateQueries({ queryKey: ['projection'] });
     },
   });
 }
@@ -43,6 +45,7 @@ export function useDeleteAsset() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['assets'] });
       qc.invalidateQueries({ queryKey: ['portfolio-summary'] });
+      qc.invalidateQueries({ queryKey: ['projection'] });
     },
   });
 }
