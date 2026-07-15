@@ -107,7 +107,7 @@ class LoanFixed:
         Returns:
             DataFrame with columns: id, date, interest_payment, principal_payment, cash_flow, value
         """
-        date_list = [self.start_date + x * relativedelta(months=1) for x in range(self.duration_months)]
+        date_list = pd.date_range(start=self.start_date, periods=self.duration_months, freq="MS")
 
         interest_payments = self.get_interest_paymnets()
         principal_payment = self.get_principal_payment()
@@ -399,7 +399,7 @@ class LoanVariable:
         Returns:
             DataFrame with columns: id, date, interest_payment, principal_payment, cash_flow, value
         """
-        date_list = [self.start_date + relativedelta(months=x) for x in range(self.duration_months)]
+        date_list = pd.date_range(start=self.start_date, periods=self.duration_months, freq="MS")
 
         interest_payments = self.get_interest_payments()
         principal_payments = self.get_principal_payment()
@@ -529,18 +529,35 @@ class LoanPrimePegged(LoanFixed):
             index_change_calendar_df["duration_till_end_of_loan"].round().astype(int)
         )
 
+        # Drop rate-change segments that start on/after the loan's own end date. IndexTracker's
+        # history always includes synthetic mean-reversion rows ~1/2/3 years past the last real
+        # rate change; for a loan that matures before those synthetic dates, such a segment has a
+        # non-positive duration_till_end_of_loan, which yields an empty per-period frame below and
+        # crashes a later iteration's .iloc[] lookup with an IndexError. Only segments that
+        # actually overlap the loan's life are relevant.
+        index_change_calendar_df = index_change_calendar_df[
+            index_change_calendar_df["start"] < loan_end_date
+        ].reset_index(drop=True)
+
+        last_period_key = None
         for row_i, row in index_change_calendar_df.iterrows():
+            if row["duration_till_end_of_loan"] <= 0:
+                # Defensive guard: should not occur after the filter above, but skip any
+                # remaining zero/negative-duration segment rather than building an empty frame.
+                continue
+
             start_value = self.value
-            if projected_df_per_period:
-                i = projected_df_per_period[row_i - 1].date.searchsorted(row["start"]) - 1
-                start_value = projected_df_per_period[row_i - 1].iloc[i, projected_df.columns.get_loc(VALUE)]
+            if last_period_key is not None:
+                prev_df = projected_df_per_period[last_period_key]
+                i = prev_df.date.searchsorted(row["start"]) - 1
+                start_value = prev_df.iloc[i, prev_df.columns.get_loc(VALUE)]
 
             periods = range(1, row["duration_till_end_of_loan"] + 1)
             # Effective rate = loan's origination rate + cumulative prime move since origination.
             rate_decimal = self.yearly_interest_rate + (float(row["rate"]) - origination_prime) / 100
             duration = row["duration_till_end_of_loan"]
 
-            date_list = [row["start"].replace(day=1) + x * relativedelta(months=1) for x in range(duration)]
+            date_list = pd.date_range(start=row["start"].replace(day=1), periods=duration, freq="MS")
 
             monthly_rate_decimal = rate_decimal / 12
             interest_payment = npf.ipmt(rate=monthly_rate_decimal, per=periods, nper=duration, pv=-start_value)
@@ -559,6 +576,7 @@ class LoanPrimePegged(LoanFixed):
             projected_df[CASH_FLOW] = projected_df["interest_payment"] + projected_df["principal_payment"]
             projected_df[VALUE] = start_value - projected_df["principal_payment"].cumsum()
             projected_df_per_period[row_i] = projected_df
+            last_period_key = row_i
 
         complete_projected_df = pd.DataFrame
         period_ids = sorted(list(projected_df_per_period.keys()), reverse=True)
@@ -571,6 +589,9 @@ class LoanPrimePegged(LoanFixed):
                 complete_projected_df = pd.concat([complete_projected_df, df.loc[df.date < min_date_so_far]])
         if self.repayment_date:
             complete_projected_df = complete_projected_df[complete_projected_df["date"] < self.repayment_date]
+        # Segments are assembled latest-start-first (see loop above), so rows are not in date
+        # order; sort chronologically before returning.
+        complete_projected_df = complete_projected_df.sort_values("date").reset_index(drop=True)
         return complete_projected_df
 
     @error_handler
@@ -768,6 +789,46 @@ class LoanCPIPegged(LoanFixed):
         loan.collateral_asset = data.get("collateral_asset")
 
         return loan
+
+
+class LoanInterestOnly(LoanFixed):
+    """
+    Non-amortizing (interest-only / balloon) loan.
+
+    There are NO scheduled repayments — the balance ACCRUES at the interest rate and grows over
+    time, to be repaid in a lump sum at some indefinite future point (e.g. a crypto-collateralized
+    loan repaid only when the collateral appreciates). Unlike LoanFixed, get_projection() produces
+    a GROWING balance and zero periodic cash flow (the accrued interest capitalizes into the
+    balance rather than being paid).
+    """
+
+    @error_handler
+    def get_projection(self) -> pd.DataFrame:
+        date_list = pd.date_range(start=self.start_date, periods=self.duration_months, freq="MS")
+        monthly_rate_decimal = annual_pct_to_monthly_decimal(self.interest_rate_annual_pct)
+
+        # self.value is the (negative) balance at start_date; it compounds — growing in magnitude
+        # each month — because nothing is repaid.
+        values = [self.value * ((1 + monthly_rate_decimal) ** i) for i in range(self.duration_months)]
+
+        df = pd.DataFrame({
+            "id": self.id,
+            "date": date_list,
+            "interest_payment": [0.0] * self.duration_months,
+            "principal_payment": [0.0] * self.duration_months,
+        })
+        df[CASH_FLOW] = 0.0   # no repayments -> no cash outflow
+        df[VALUE] = values    # negative liability, growing in magnitude as interest accrues
+
+        if self.repayment_date:
+            df = df[df["date"] < self.repayment_date]
+        return df
+
+    @error_handler
+    def to_dict(self) -> Dict[str, Any]:
+        base_dict = super().to_dict()
+        base_dict["type"] = "interest_only"
+        return base_dict
 
 
 # Module metadata

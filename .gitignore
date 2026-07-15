@@ -16,6 +16,17 @@ venv/
 # Personal baseline portfolio configs — NEVER commit (real financial data; repo is public)
 data/configs/
 
+# Personal data-mutation scripts + working sdlc docs — embed real figures (salary, net worth,
+# pension, loans, rent, expenses). Run locally / against private DBs only; NEVER on the public repo.
+fplan_v2/scripts/update_holdings_snapshot.py
+fplan_v2/scripts/update_income_and_ledn.py
+fplan_v2/scripts/add_expenditures_and_omer.py
+fplan_v2/scripts/add_ledn_crypto_loan.py
+fplan_v2/scripts/update_rent_lease.py
+fplan_v2/scripts/set_rent_step_growth.py
+docs/plan.md
+docs/progress.md
+
 # Guide-video generation tool — raw working dir (~400 MB, its own node_modules/out)
 fplan_v2/guide-video/
 

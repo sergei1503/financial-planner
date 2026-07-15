@@ -22,6 +22,28 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
+# This file is a manual, standalone diagnostic script (see module docstring and
+# setup_test_db.sh) that connects to a REAL Postgres instance via NEON_DATABASE_URL /
+# DATABASE_URL and performs live schema-creation and CRUD operations against it. In
+# this repo that env var points at a shared remote Postgres instance holding real
+# (non-test) data -- not an isolated, disposable test database. Running it inside the
+# automated `pytest fplan_v2/tests` sweep is unsafe (it could mutate real data) and
+# non-deterministic offline (an unreachable host makes it hang rather than fail fast).
+# Skip it under pytest; the `python fplan_v2/tests/test_db_infrastructure.py` /
+# setup_test_db.sh entry points below remain fully usable for manual verification
+# against a disposable database.
+if "pytest" in sys.modules:
+    import pytest
+
+    pytest.skip(
+        "test_db_infrastructure.py exercises a REAL remote Postgres instance "
+        "(NEON_DATABASE_URL/DATABASE_URL) with live schema + CRUD operations. It's a "
+        "manual diagnostic script, not part of the automated offline test suite -- run "
+        "it directly with `python fplan_v2/tests/test_db_infrastructure.py` (or "
+        "setup_test_db.sh) against a disposable database instead.",
+        allow_module_level=True,
+    )
+
 
 def test_environment_variables():
     """Test that required environment variables are set."""

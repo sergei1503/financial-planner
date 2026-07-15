@@ -1,4 +1,4 @@
-import { useMutation, useQuery } from '@tanstack/react-query';
+import { keepPreviousData, useMutation, useQuery } from '@tanstack/react-query';
 import { projectionsApi } from '@/api/projections';
 import type { ProjectionRequest } from '@/api/types';
 
@@ -16,5 +16,8 @@ export function useProjectionQuery(params: ProjectionRequest = {}) {
     gcTime: 10 * 60 * 1000, // 10 minutes
     refetchOnWindowFocus: false,
     refetchOnMount: false,
+    // Keep the previous projection visible while a refetch (after an edit) is in flight,
+    // so the chart doesn't blank out during the ~0.2-1.9s recompute.
+    placeholderData: keepPreviousData,
   });
 }

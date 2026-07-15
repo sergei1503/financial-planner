@@ -13,6 +13,7 @@ Classes:
     PensionRevenueStream: Pension payout stream
 """
 
+import math
 from typing import Dict, Any, Optional, Union
 import numpy as np
 import numpy_financial as npf
@@ -164,6 +165,8 @@ class RentRevenueStream(RevenueStream):
         tax: Tax rate as percentage
         growth_rate: Annual growth rate as percentage
         end_date: Optional end date for rental period
+        step_growth: If True, growth steps once per year on the anniversary (flat within
+            each lease year) instead of compounding smoothly month-to-month.
     """
 
     def __init__(
@@ -175,6 +178,7 @@ class RentRevenueStream(RevenueStream):
         tax: float,
         growth_rate: float = 0,
         end_date: Optional[Union[str, datetime, pd.Timestamp]] = None,
+        step_growth: bool = False,
     ):
         super().__init__(id, start_date)
         self.amount = float(amount)
@@ -182,6 +186,7 @@ class RentRevenueStream(RevenueStream):
         self.tax = float(tax) if tax else 0
         self.growth_rate = float(growth_rate)
         self.end_date = parse_date(end_date, normalize_to_month_start=True) if end_date else None
+        self.step_growth = bool(step_growth)
 
     def get_cash_flow(self) -> pd.DataFrame:
         """Calculate rental income cash flow with periodic payments and growth."""
@@ -223,8 +228,13 @@ class RentRevenueStream(RevenueStream):
         growth_rate_decimal = self.growth_rate / 100.0  # Convert percentage to decimal
 
         for i, date in enumerate(date_list):
-            # Calculate years from start date for proper annual compounding
-            years_from_start = i * (period_months / 12.0)
+            if self.step_growth:
+                # Floor to whole years: growth steps once per year on the anniversary,
+                # flat within each lease year (exact stepped lease modeling).
+                years_from_start = math.floor(i * (period_months / 12.0))
+            else:
+                # Calculate years from start date for proper annual compounding
+                years_from_start = i * (period_months / 12.0)
             # Apply annual growth: amount * (1 + annual_rate)^years
             cash_flow_amount = self.amount * ((1 + growth_rate_decimal) ** years_from_start)
             cash_flows.append(cash_flow_amount)
@@ -253,6 +263,7 @@ class RentRevenueStream(RevenueStream):
             "tax": self.tax,
             "growth_rate": self.growth_rate,
             "end_date": self.end_date.strftime("%Y-%m-%d") if self.end_date else None,
+            "step_growth": self.step_growth,
         }
 
     @classmethod
@@ -267,6 +278,7 @@ class RentRevenueStream(RevenueStream):
             tax=data["tax"],
             growth_rate=data.get("growth_rate", 0),
             end_date=data.get("end_date"),
+            step_growth=data.get("step_growth", False),
         )
 
 

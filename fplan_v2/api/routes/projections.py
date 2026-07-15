@@ -48,6 +48,7 @@ from fplan_v2.core.models.loan import (
     LoanVariable,
     LoanPrimePegged,
     LoanCPIPegged,
+    LoanInterestOnly,
 )
 from fplan_v2.core.models.revenue_stream import (
     RentRevenueStream,
@@ -130,6 +131,7 @@ def _convert_orm_revenue_stream_to_business(db_stream: models.RevenueStream):
             tax=float(db_stream.tax_rate or 0),
             growth_rate=float(db_stream.growth_rate or 0),
             end_date=db_stream.end_date,
+            step_growth=config.get("step_growth", False),
         )
     elif stream_type == "salary":
         return SalaryRevenueStream(
@@ -262,6 +264,14 @@ def _convert_orm_loan_to_business(db_loan: models.Loan, index_tracker: IndexTrac
     start = db_loan.start_date
     collateral = str(db_loan.collateral_asset_id) if db_loan.collateral_asset_id else None
 
+    # Non-amortizing / interest-only (balloon) loan: balance accrues and grows, no repayments.
+    # Flagged via config_json {"non_amortizing": true}; the interest rate is the accrual rate.
+    if config.get("non_amortizing"):
+        return LoanInterestOnly(
+            id=loan_id, value=value, interest_rate_annual_pct=rate,
+            duration_months=duration, start_date=start, collateral_asset=collateral,
+        )
+
     # Create appropriate loan type — each has different __init__ signature
     if db_loan.loan_type == "fixed":
         loan = LoanFixed(
@@ -301,9 +311,15 @@ def _convert_orm_loan_to_business(db_loan: models.Loan, index_tracker: IndexTrac
             collateral_asset=collateral,
         )
 
-    # Set current balance if available
-    if db_loan.current_balance:
-        loan.value = -float(db_loan.current_balance)
+    # NOTE: we intentionally do NOT override loan.value with current_balance here.
+    # A loan's get_projection() amortizes from its ORIGINATION principal starting at
+    # start_date, so loan.value must stay = original_value for the schedule to be
+    # correct. current_balance is a display/summary field (and the actual remaining
+    # balance is pinned into the projection via historical measurements in
+    # _apply_measurement_shifts). Overriding with current_balance here would treat the
+    # current remaining as the origination principal and distort the whole amortization
+    # curve. This is a no-op for data where current_balance == original_value, and is
+    # what lets a loan carry a real (lower) current_balance without breaking projections.
 
     return loan
 
@@ -369,12 +385,12 @@ def _apply_cash_conversions(
                 proceeds = sale_value * (1 - sell_tax)
                 adjustments[sell_ts] = adjustments.get(sell_ts, 0) + proceeds
 
-        # Deposit cash flow impact: sum per-asset cash flows into adjustments
+        # Deposit cash flow impact: sum per-asset cash flows into adjustments.
+        # Vectorized column access instead of iterrows() (dates are unique within this df).
         if CASH_FLOW in asset_df.columns:
-            for _, row in asset_df.iterrows():
-                cf_val = float(row[CASH_FLOW])
+            for dt, cf_val in zip(asset_df["date"], asset_df[CASH_FLOW]):
+                cf_val = float(cf_val)
                 if cf_val != 0:
-                    dt = row["date"]
                     adjustments[dt] = adjustments.get(dt, 0) + cf_val
 
     # Apply adjustments to cash asset projection
@@ -382,16 +398,20 @@ def _apply_cash_conversions(
         # Recalculate cash as running balance from initial value + all monthly adjustments
         cash_df = cash_df.sort_values("date").reset_index(drop=True)
         initial_value = float(cash_df[VALUE].iloc[0])
-        running = initial_value
 
-        for idx, row in cash_df.iterrows():
-            dt = row["date"]
+        # Vectorized column access instead of iterrows()/`.at[]` — build the adjustment
+        # sequence with a plain list comprehension, then accumulate in a single pass
+        # (same additions, same order, as the original per-row running total).
+        running = initial_value
+        new_values = []
+        for idx, dt in enumerate(cash_df["date"]):
             adj = adjustments.get(dt, 0)
             if idx == 0:
                 running = initial_value + adj
             else:
                 running += adj
-            cash_df.at[idx, VALUE] = running
+            new_values.append(running)
+        cash_df[VALUE] = new_values
 
         all_asset_dfs[cash_idx] = cash_df
 
@@ -468,14 +488,13 @@ def _project_standalone_revenue_streams(
             if cf_df.empty:
                 continue
 
+            # Precompute date->cash_flow dict once per stream df (dates are unique per stream)
+            # instead of an O(n) boolean-mask filter for every date in all_dates.
+            cf_lookup = dict(zip(cf_df["date"], cf_df[CASH_FLOW]))
             series = []
             for dt in all_dates:
                 ts = pd.Timestamp(dt)
-                matching = cf_df[cf_df["date"] == ts]
-                if not matching.empty:
-                    val = float(matching[CASH_FLOW].iloc[0])
-                else:
-                    val = 0.0
+                val = float(cf_lookup.get(ts, 0.0))
                 series.append(TimeSeriesDataPoint(
                     date=dt.date() if isinstance(dt, pd.Timestamp) else dt,
                     value=Decimal(str(val)),
@@ -823,15 +842,16 @@ def compute_projection(
         all_asset_dfs, db_assets, all_loan_dfs, db_loans, measurements,
     )
 
-    # Rebuild asset time series after cash conversion and measurement adjustments
+    # Rebuild asset time series after cash conversion and measurement adjustments.
+    # Vectorized column access (zip) instead of iterrows() — same row order, far less overhead.
     asset_projections_list = []
     for i, asset_df in enumerate(all_asset_dfs):
         time_series = [
             TimeSeriesDataPoint(
-                date=row["date"].date(),
-                value=Decimal(str(row[VALUE]))
+                date=dt.date(),
+                value=Decimal(str(val))
             )
-            for _, row in asset_df.iterrows()
+            for dt, val in zip(asset_df["date"], asset_df[VALUE])
         ]
         asset_projections_list.append(AssetProjection(
             asset_id=db_assets[i].id,
@@ -845,18 +865,18 @@ def compute_projection(
     for i, loan_df in enumerate(all_loan_dfs):
         balance_series = [
             TimeSeriesDataPoint(
-                date=row["date"].date(),
-                value=Decimal(str(abs(row[VALUE])))
+                date=dt.date(),
+                value=Decimal(str(abs(val)))
             )
-            for _, row in loan_df.iterrows()
+            for dt, val in zip(loan_df["date"], loan_df[VALUE])
         ]
 
         payment_series = [
             TimeSeriesDataPoint(
-                date=row["date"].date(),
-                value=Decimal(str(abs(row[CASH_FLOW])))
+                date=dt.date(),
+                value=Decimal(str(abs(val)))
             )
-            for _, row in loan_df.iterrows()
+            for dt, val in zip(loan_df["date"], loan_df[CASH_FLOW])
         ]
 
         loan_projections_list.append(LoanProjection(
@@ -937,27 +957,21 @@ def compute_projection(
     total_liabilities_series: List[TimeSeriesDataPoint] = []
     cash_flow_series: List[TimeSeriesDataPoint] = []
 
+    # Precompute date->value dicts once (dates are unique within each groupby'd df) so the
+    # per-date loop below is O(1) dict lookups instead of O(n) boolean-mask filters.
+    assets_by_date_lookup = dict(zip(total_assets_by_date["date"], total_assets_by_date[VALUE])) if not total_assets_by_date.empty else {}
+    liabilities_by_date_lookup = dict(zip(total_liabilities_by_date["date"], total_liabilities_by_date[VALUE])) if not total_liabilities_by_date.empty else {}
+    payments_by_date_lookup = dict(zip(total_payments_by_date["date"], total_payments_by_date[CASH_FLOW])) if not total_payments_by_date.empty else {}
+
     for dt in all_dates:
         # Get asset value for this date
-        if not total_assets_by_date.empty:
-            asset_row = total_assets_by_date[total_assets_by_date["date"] == dt]
-            asset_value = float(asset_row[VALUE].iloc[0]) if not asset_row.empty else 0.0
-        else:
-            asset_value = 0.0
+        asset_value = float(assets_by_date_lookup.get(dt, 0.0))
 
         # Get liability value for this date
-        if not total_liabilities_by_date.empty:
-            liability_row = total_liabilities_by_date[total_liabilities_by_date["date"] == dt]
-            liability_value = abs(float(liability_row[VALUE].iloc[0])) if not liability_row.empty else 0.0
-        else:
-            liability_value = 0.0
+        liability_value = abs(float(liabilities_by_date_lookup.get(dt, 0.0)))
 
         # Get cash flow for this date
-        if not total_payments_by_date.empty:
-            payment_row = total_payments_by_date[total_payments_by_date["date"] == dt]
-            payment_value = abs(float(payment_row[CASH_FLOW].iloc[0])) if not payment_row.empty else 0.0
-        else:
-            payment_value = 0.0
+        payment_value = abs(float(payments_by_date_lookup.get(dt, 0.0)))
 
         # Calculate net worth
         net_worth = asset_value - liability_value
@@ -992,10 +1006,12 @@ def compute_projection(
     for i, loan_df in enumerate(all_loan_dfs):
         if loan_df.empty:
             continue
+        # Precompute date->cash_flow dict once per loan df (dates are unique per loan)
+        # instead of an O(n) boolean-mask filter for every date in all_dates.
+        loan_cf_lookup = dict(zip(loan_df["date"], loan_df[CASH_FLOW]))
         series = []
         for dt in all_dates:
-            matching = loan_df[loan_df["date"] == dt]
-            val = abs(float(matching[CASH_FLOW].iloc[0])) if not matching.empty else 0.0
+            val = abs(float(loan_cf_lookup.get(dt, 0.0)))
             series.append(TimeSeriesDataPoint(
                 date=dt.date() if isinstance(dt, pd.Timestamp) else dt,
                 value=Decimal(str(val)),
@@ -1032,6 +1048,10 @@ def compute_projection(
                 cash_flows_by_flag[flag] = []
             cash_flows_by_flag[flag].append(cf)
 
+        # Precompute date->cash_flow dict once per asset df (dates are unique per asset)
+        # instead of an O(n) boolean-mask filter for every (date, cf) pair below.
+        asset_cf_lookup = dict(zip(asset_df["date"], asset_df[CASH_FLOW]))
+
         # Create breakdown items only for own capital deposits (employer deposits don't affect cash flow)
         for from_own_capital, cfs in cash_flows_by_flag.items():
             if not from_own_capital:
@@ -1047,9 +1067,8 @@ def compute_projection(
                     cf_end = pd.Timestamp(cf.to_date).replace(day=1)
                     if cf_start <= dt <= cf_end:
                         # Get value from asset_df for this date
-                        matching = asset_df[asset_df["date"] == dt]
-                        if not matching.empty:
-                            val += float(matching[CASH_FLOW].iloc[0])
+                        if dt in asset_cf_lookup:
+                            val += float(asset_cf_lookup[dt])
 
                 series.append(TimeSeriesDataPoint(
                     date=dt.date() if isinstance(dt, pd.Timestamp) else dt,
@@ -1090,11 +1109,13 @@ def compute_projection(
                 continue
             if cf_df.empty:
                 continue
+            # Precompute date->cash_flow dict once per stream df (dates are unique per stream)
+            # instead of an O(n) boolean-mask filter for every date in all_dates.
+            cf_lookup = dict(zip(cf_df["date"], cf_df[CASH_FLOW]))
             series = []
             for dt in all_dates:
                 ts = pd.Timestamp(dt)
-                matching = cf_df[cf_df["date"] == ts]
-                val = float(matching[CASH_FLOW].iloc[0]) if not matching.empty else 0.0
+                val = float(cf_lookup.get(ts, 0.0))
                 series.append(TimeSeriesDataPoint(
                     date=dt.date() if isinstance(dt, pd.Timestamp) else dt,
                     value=Decimal(str(val)),
@@ -1116,15 +1137,17 @@ def compute_projection(
         asset_df = all_asset_dfs[i]
         if asset_df.empty or CASH_FLOW not in asset_df.columns:
             continue
+        # Precompute date->cash_flow dict once per asset df (dates are unique per asset)
+        # instead of an O(n) boolean-mask filter for every date in all_dates.
+        pension_cf_lookup = dict(zip(asset_df["date"], asset_df[CASH_FLOW]))
         series = []
         for dt in all_dates:
             ts = pd.Timestamp(dt)
-            matching = asset_df[asset_df["date"] == ts]
             # A PensionAsset's CASH_FLOW column holds BOTH deposit contributions (negative,
             # already accounted for as an expense/own-capital item) and the annuity payout
             # (positive income). Only the positive payout is income here — counting the
             # negative deposit would double-count it against the deposit item.
-            raw = float(matching[CASH_FLOW].iloc[0]) if not matching.empty else 0.0
+            raw = float(pension_cf_lookup.get(ts, 0.0))
             val = max(0.0, raw)
             series.append(TimeSeriesDataPoint(
                 date=dt.date() if isinstance(dt, pd.Timestamp) else dt,
@@ -1384,7 +1407,8 @@ def get_portfolio_summary(
     net_worth = total_assets - total_liabilities
     monthly_revenue = summary["monthly_revenue"]
     monthly_loan_payments = summary["monthly_payments"]
-    monthly_net_cash_flow = monthly_revenue - monthly_loan_payments
+    monthly_outflows = summary["monthly_outflows"]
+    monthly_net_cash_flow = monthly_revenue - monthly_loan_payments - monthly_outflows
 
     return PortfolioSummary(
         user_id=user_id,

@@ -15,7 +15,7 @@ from sqlalchemy import create_engine, event, JSON
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from fplan_v2.db.models import Base, User, Asset, Loan, CashFlow, RevenueStream, HistoricalMeasurement
+from fplan_v2.db.models import Base, User, Portfolio, Asset, Loan, CashFlow, RevenueStream, HistoricalMeasurement
 from fplan_v2.db.connection import get_db_session
 from fplan_v2.api.main import app
 
@@ -65,8 +65,6 @@ def override_get_db_session():
         db.close()
 
 
-app.dependency_overrides[get_db_session] = override_get_db_session
-
 client = TestClient(app)
 
 
@@ -84,11 +82,35 @@ def setup_db():
     try:
         user = User(id=1, name="Test User", email="test@fplan.local")
         db.add(user)
+        db.flush()
+        # Every seeded entity below sets portfolio_id=1, so pre-seed the matching
+        # default Portfolio row here. Without this, get_current_portfolio() would
+        # auto-create its own default portfolio (still id=1 on a fresh DB) but
+        # relying on that side effect is fragile -- seed it explicitly instead.
+        portfolio = Portfolio(id=1, user_id=1, name="Test Portfolio", is_default=True)
+        db.add(portfolio)
         db.commit()
     finally:
         db.close()
 
+    # This module's TestClient must resolve get_db_session to ITS OWN isolated
+    # in-memory engine. Other integration test files in this directory (e.g.
+    # test_api_integration.py, test_cash_flows_api.py) do the same thing at import
+    # time against the same shared `app` singleton -- if all files register their
+    # override once at module import, whichever module pytest collects LAST wins
+    # for every test in the whole run (silently pointing other files' requests at
+    # the wrong engine, whose tables may not even be created yet -> "no such table").
+    # Apply/restore the override per-test instead, so file collection order can't
+    # matter.
+    previous_override = app.dependency_overrides.get(get_db_session)
+    app.dependency_overrides[get_db_session] = override_get_db_session
+
     yield
+
+    if previous_override is not None:
+        app.dependency_overrides[get_db_session] = previous_override
+    else:
+        app.dependency_overrides.pop(get_db_session, None)
 
     Base.metadata.drop_all(bind=engine)
 
@@ -104,6 +126,7 @@ def _seed_stock_asset_with_deposits(db_session=None):
     try:
         asset = Asset(
             user_id=1,
+            portfolio_id=1,
             external_id="stock-1",
             asset_type="stock",
             name="Test Stock",
@@ -121,6 +144,7 @@ def _seed_stock_asset_with_deposits(db_session=None):
         # Deposit
         deposit = CashFlow(
             user_id=1,
+            portfolio_id=1,
             flow_type="deposit",
             target_asset_id=asset.id,
             name="Monthly deposit",
@@ -134,6 +158,7 @@ def _seed_stock_asset_with_deposits(db_session=None):
         # Withdrawal
         withdrawal = CashFlow(
             user_id=1,
+            portfolio_id=1,
             flow_type="withdrawal",
             target_asset_id=asset.id,
             name="Emergency withdrawal",
@@ -156,6 +181,7 @@ def _seed_cash_asset():
     try:
         asset = Asset(
             user_id=1,
+            portfolio_id=1,
             external_id="cash-1",
             asset_type="cash",
             name="Cash",
@@ -179,6 +205,7 @@ def _seed_pension_asset_with_deposits():
     try:
         asset = Asset(
             user_id=1,
+            portfolio_id=1,
             external_id="pension-1",
             asset_type="pension",
             name="Pension Fund",
@@ -195,6 +222,7 @@ def _seed_pension_asset_with_deposits():
 
         deposit = CashFlow(
             user_id=1,
+            portfolio_id=1,
             flow_type="deposit",
             target_asset_id=asset.id,
             name="Employer contribution",
@@ -215,6 +243,7 @@ def _seed_fixed_loan():
     try:
         loan = Loan(
             user_id=1,
+            portfolio_id=1,
             external_id="loan-fixed-1",
             loan_type="fixed",
             name="Fixed Mortgage",
@@ -236,6 +265,7 @@ def _seed_prime_pegged_loan():
     try:
         loan = Loan(
             user_id=1,
+            portfolio_id=1,
             external_id="loan-prime-1",
             loan_type="prime_pegged",
             name="Prime Mortgage",
@@ -260,6 +290,13 @@ def _seed_prime_pegged_loan():
 class TestProjectionEndpoint:
     """Tests for POST /api/projections/run"""
 
+    # compute_projection() (fplan_v2/api/routes/projections.py) always appends a
+    # synthetic "accumulated cash" virtual entry (asset_id=0, name "מזומנים מצטברים")
+    # to asset_projections whenever cash_flow_breakdown.net_series is non-empty --
+    # which in practice is true for essentially every non-empty projection window,
+    # deposits or not. Product decision (confirmed): the virtual accumulated-cash
+    # asset SHOULD always appear in asset_projections. The four tests below assert
+    # `len(asset_projections) == <seeded asset count> + 1` to account for it.
     def test_projection_runs_with_stock_and_cash_assets(self):
         """Stock asset with deposits/withdrawals + cash asset should project without crash."""
         _seed_cash_asset()
@@ -271,7 +308,8 @@ class TestProjectionEndpoint:
         })
         assert resp.status_code == 200, f"Projection failed: {resp.text}"
         data = resp.json()
-        assert len(data["asset_projections"]) == 2
+        # +1 for the always-present virtual accumulated-cash asset (asset_id=0)
+        assert len(data["asset_projections"]) == 3
         assert len(data["net_worth_series"]) > 0
 
     def test_projection_runs_with_loans(self):
@@ -307,6 +345,7 @@ class TestProjectionEndpoint:
         try:
             asset = Asset(
                 user_id=1,
+                portfolio_id=1,
                 external_id="sell-apt",
                 asset_type="real_estate",
                 name="Sell Apartment",
@@ -332,7 +371,8 @@ class TestProjectionEndpoint:
         })
         assert resp.status_code == 200, f"Projection failed: {resp.text}"
         data = resp.json()
-        assert len(data["asset_projections"]) == 2
+        # +1 for the always-present virtual accumulated-cash asset (asset_id=0)
+        assert len(data["asset_projections"]) == 3
 
     def test_projection_with_pension_deposits(self):
         """PensionAsset with deposits from cash_flows should not crash (A3 regression)."""
@@ -344,7 +384,8 @@ class TestProjectionEndpoint:
         })
         assert resp.status_code == 200, f"Projection failed: {resp.text}"
         data = resp.json()
-        assert len(data["asset_projections"]) == 1
+        # +1 for the always-present virtual accumulated-cash asset (asset_id=0)
+        assert len(data["asset_projections"]) == 2
 
     def test_projection_deposit_key_name(self):
         """Cash flows should use deposit_from_own_capital key (A1 regression)."""
@@ -371,7 +412,8 @@ class TestProjectionEndpoint:
         })
         assert resp.status_code == 200, f"Full projection failed: {resp.text}"
         data = resp.json()
-        assert len(data["asset_projections"]) == 3
+        # +1 for the always-present virtual accumulated-cash asset (asset_id=0)
+        assert len(data["asset_projections"]) == 4
         assert len(data["loan_projections"]) == 2
         assert len(data["net_worth_series"]) > 0
         assert len(data["monthly_cash_flow_series"]) > 0
@@ -406,6 +448,7 @@ class TestProjectionEndpoint:
         try:
             asset = Asset(
                 user_id=1,
+                portfolio_id=1,
                 external_id="apt-rent",
                 asset_type="real_estate",
                 name="Rental Apartment",
@@ -422,6 +465,7 @@ class TestProjectionEndpoint:
 
             rent_stream = RevenueStream(
                 user_id=1,
+                portfolio_id=1,
                 asset_id=asset.id,
                 stream_type="rent",
                 name="Apartment Rent",
@@ -459,6 +503,7 @@ class TestProjectionEndpoint:
         try:
             salary = RevenueStream(
                 user_id=1,
+                portfolio_id=1,
                 asset_id=None,
                 stream_type="salary",
                 name="Main Job Salary",
@@ -517,13 +562,13 @@ class TestProjectionEngineFixes:
         db = TestingSessionLocal()
         try:
             db.add(Asset(
-                user_id=1, external_id="cash-x", asset_type="cash", name="Cash",
+                user_id=1, portfolio_id=1, external_id="cash-x", asset_type="cash", name="Cash",
                 start_date=date(2020, 1, 1), original_value=50000,
                 appreciation_rate_annual_pct=0, yearly_fee_pct=0, sell_tax=0,
                 currency="ILS", config_json={},
             ))
             db.add(Asset(
-                user_id=1, external_id="stock-sell", asset_type="stock", name="Stock To Sell",
+                user_id=1, portfolio_id=1, external_id="stock-sell", asset_type="stock", name="Stock To Sell",
                 start_date=date(2020, 1, 1), original_value=100000,
                 appreciation_rate_annual_pct=7.0, yearly_fee_pct=0, sell_tax=0,
                 sell_date=date(2030, 6, 1), currency="ILS", config_json={},
@@ -549,13 +594,13 @@ class TestProjectionEngineFixes:
         db = TestingSessionLocal()
         try:
             db.add(Asset(
-                user_id=1, external_id="early", asset_type="stock", name="Early",
+                user_id=1, portfolio_id=1, external_id="early", asset_type="stock", name="Early",
                 start_date=date(2020, 1, 1), original_value=100000,
                 appreciation_rate_annual_pct=5, yearly_fee_pct=0, sell_tax=0,
                 currency="ILS", config_json={},
             ))
             db.add(Asset(
-                user_id=1, external_id="late", asset_type="stock", name="Late",
+                user_id=1, portfolio_id=1, external_id="late", asset_type="stock", name="Late",
                 start_date=date(2026, 1, 1), original_value=100000,
                 appreciation_rate_annual_pct=5, yearly_fee_pct=0, sell_tax=0,
                 currency="ILS", config_json={},
@@ -584,7 +629,7 @@ class TestProjectionEngineFixes:
         db = TestingSessionLocal()
         try:
             pension = Asset(
-                user_id=1, external_id="pension-conv", asset_type="pension",
+                user_id=1, portfolio_id=1, external_id="pension-conv", asset_type="pension",
                 name="Annuity Pension", start_date=date(2020, 1, 1),
                 original_value=200000, appreciation_rate_annual_pct=5,
                 yearly_fee_pct=0, sell_tax=0, currency="ILS",
@@ -595,7 +640,7 @@ class TestProjectionEngineFixes:
             db.add(pension)
             db.flush()
             db.add(HistoricalMeasurement(
-                user_id=1, entity_type="asset", entity_id=pension.id,
+                user_id=1, portfolio_id=1, entity_type="asset", entity_id=pension.id,
                 measurement_date=date(2024, 1, 1), actual_value=200000, source="manual",
             ))
             db.commit()
@@ -634,7 +679,7 @@ class TestRealisticModelingFixes:
         db = TestingSessionLocal()
         try:
             db.add(Loan(
-                user_id=1, external_id="cpi-1", loan_type="cpi_pegged", name="CPI Loan",
+                user_id=1, portfolio_id=1, external_id="cpi-1", loan_type="cpi_pegged", name="CPI Loan",
                 start_date=date(2022, 5, 1), original_value=325000,
                 interest_rate_annual_pct=2.25, duration_months=360,
                 config_json={"expected_cpi_increase_percent_yearly": 3},
@@ -657,7 +702,7 @@ class TestRealisticModelingFixes:
         db = TestingSessionLocal()
         try:
             db.add(Loan(
-                user_id=1, external_id="prime-1", loan_type="prime_pegged", name="Prime Loan",
+                user_id=1, portfolio_id=1, external_id="prime-1", loan_type="prime_pegged", name="Prime Loan",
                 start_date=date(2022, 5, 1), original_value=600000,
                 interest_rate_annual_pct=2.4, duration_months=360, config_json={},
             ))
@@ -677,7 +722,7 @@ class TestRealisticModelingFixes:
         db = TestingSessionLocal()
         try:
             asset = Asset(
-                user_id=1, external_id="pension-x", asset_type="pension", name="Pension X",
+                user_id=1, portfolio_id=1, external_id="pension-x", asset_type="pension", name="Pension X",
                 start_date=date(2022, 1, 1), original_value=200000,
                 appreciation_rate_annual_pct=4, yearly_fee_pct=0, sell_tax=0, currency="ILS",
                 config_json={"conversion_date": "2035-01-01", "conversion_coefficient": 200},
@@ -685,7 +730,7 @@ class TestRealisticModelingFixes:
             db.add(asset)
             db.flush()
             db.add(CashFlow(
-                user_id=1, flow_type="deposit", target_asset_id=asset.id, name="pension deposit",
+                user_id=1, portfolio_id=1, flow_type="deposit", target_asset_id=asset.id, name="pension deposit",
                 amount=3000, from_date=date(2022, 1, 1), to_date=date(2035, 1, 1),
                 from_own_capital=True,
             ))
@@ -707,19 +752,19 @@ class TestRealisticModelingFixes:
         db = TestingSessionLocal()
         try:
             asset = Asset(
-                user_id=1, external_id="stock-emp", asset_type="stock", name="Employer Stock",
+                user_id=1, portfolio_id=1, external_id="stock-emp", asset_type="stock", name="Employer Stock",
                 start_date=date(2020, 1, 1), original_value=100000, appreciation_rate_annual_pct=5,
                 yearly_fee_pct=0, sell_tax=0, currency="ILS", config_json={},
             )
             db.add(asset)
             db.flush()
             db.add(CashFlow(
-                user_id=1, flow_type="deposit", target_asset_id=asset.id, name="employer deposit",
+                user_id=1, portfolio_id=1, flow_type="deposit", target_asset_id=asset.id, name="employer deposit",
                 amount=2000, from_date=date(2024, 1, 1), to_date=date(2030, 1, 1),
                 from_own_capital=False,
             ))
             db.add(Asset(
-                user_id=1, external_id="cash-e", asset_type="cash", name="Cash E",
+                user_id=1, portfolio_id=1, external_id="cash-e", asset_type="cash", name="Cash E",
                 start_date=date(2020, 1, 1), original_value=50000, appreciation_rate_annual_pct=0,
                 yearly_fee_pct=0, sell_tax=0, currency="ILS", config_json={},
             ))

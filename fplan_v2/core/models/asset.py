@@ -408,12 +408,12 @@ class Asset:
 
                 # Apply appreciation for each month
                 monthly_rate_decimal = annual_pct_to_monthly_decimal(self.appreciation_rate_annual_pct)
-                yearly_fee_decimal = self.yearly_fee_pct / 100.0
+                monthly_fee_decimal = annual_pct_to_monthly_decimal(self.yearly_fee_pct)
 
                 for month in range(months_elapsed):
-                    next_month_date = current_date + relativedelta(months=month + 1)
-                    if next_month_date.month == 1:
-                        current_value *= 1 - yearly_fee_decimal
+                    # Apply fee every month, compounded like appreciation (was applied
+                    # once/year in January only, inconsistent with monthly appreciation).
+                    current_value *= 1 - monthly_fee_decimal
                     current_value *= 1 + monthly_rate_decimal
 
                 # Update the projection
@@ -508,11 +508,9 @@ class CashAsset(Asset):
 
         for i in range(months_to_project):
             monthly_cash_flow = 0
-            if date.month == 1:
-                # yearly_fee_pct is a percent (e.g. 0.2 == 0.2%); divide by 100 like the
-                # Stock/Pension paths do. (Was `1 - self.yearly_fee`, which applied the raw
-                # percent as a fraction — a 0.2 fee became a 20% annual haircut.)
-                value *= 1 - self.yearly_fee_pct / 100.0
+            # Apply fee every month, compounded like appreciation (was applied once/year
+            # in January only, inconsistent with appreciation which compounds monthly).
+            value *= 1 - annual_pct_to_monthly_decimal(self.yearly_fee_pct)
 
             for deposit in self.deposits:
                 from_date = deposit["from"]
@@ -609,16 +607,20 @@ class RealEstateAsset(Asset):
     def get_projection(self, months_to_project: int = 30 * 12) -> pd.DataFrame:
         """Calculate real estate value projection with revenue stream."""
         periods = range(1, months_to_project + 1)
-        # Apply monthly appreciation using standardized rate conversion
+        # Apply monthly appreciation using standardized rate conversion, netted with the
+        # monthly fee (compounded like appreciation) for consistency with the other asset
+        # types — this is a no-op when yearly_fee_pct == 0.
         monthly_rate_decimal = annual_pct_to_monthly_decimal(self.appreciation_rate_annual_pct)
+        monthly_fee_decimal = annual_pct_to_monthly_decimal(self.yearly_fee_pct)
+        effective_monthly_rate_decimal = (1 + monthly_rate_decimal) * (1 - monthly_fee_decimal) - 1
         projected_values = fv(
-            monthly_rate_decimal,
+            effective_monthly_rate_decimal,
             periods,
             pmt=self.pmt,
             pv=-float(self.value),
             when="end",
         )
-        date_list = [self.start_date + x * relativedelta(months=1) for x in range(months_to_project)]
+        date_list = pd.date_range(start=self.start_date, periods=months_to_project, freq="MS")
 
         value_projection_dict = {
             "id": self.id,
@@ -777,10 +779,9 @@ class StockAsset(Asset):
 
             # Skip applying growth and fees for the first month if starting from historical data
             if not (i == 0 and starting_from_history):
-                # Apply yearly fee in January using standardized rate conversion
-                yearly_fee_decimal = self.yearly_fee_pct / 100.0
-                if date.month == 1:
-                    value *= 1 - yearly_fee_decimal
+                # Apply fee every month, compounded like appreciation (was applied once/year
+                # in January only, inconsistent with appreciation which compounds monthly).
+                value *= 1 - annual_pct_to_monthly_decimal(self.yearly_fee_pct)
                 # Apply monthly appreciation using standardized rate conversion
                 monthly_rate_decimal = annual_pct_to_monthly_decimal(self.appreciation_rate_annual_pct)
                 value *= 1 + monthly_rate_decimal
@@ -1032,10 +1033,9 @@ class PensionAsset(StockAsset):
                             monthly_cash_flow -= deposit["amount"]  # Own capital = expense
                         # Employer deposits don't pass through user's bank account, no cash flow impact
 
-                # Apply yearly fee (at the beginning of each year)
-                yearly_fee_decimal = self.yearly_fee_pct / 100.0
-                if date.month == 1:
-                    value *= 1 - yearly_fee_decimal
+                # Apply fee every month, compounded like appreciation (was applied once/year
+                # in January only, inconsistent with appreciation which compounds monthly).
+                value *= 1 - annual_pct_to_monthly_decimal(self.yearly_fee_pct)
 
                 # Apply monthly appreciation
                 monthly_rate_decimal = annual_pct_to_monthly_decimal(self.appreciation_rate_annual_pct)

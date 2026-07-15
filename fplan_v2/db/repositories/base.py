@@ -247,21 +247,57 @@ class BaseRepository(Generic[ModelType]):
                 FROM loans
                 WHERE user_id = :user_id{portfolio_clause}
             ),
+            revenue_with_growth AS (
+                SELECT
+                    period,
+                    amount,
+                    tax_rate,
+                    -- Fractional years elapsed since start_date, floored to whole years
+                    -- for stepped streams (flat within each lease/anniversary year).
+                    POWER(
+                        1 + COALESCE(growth_rate, 0) / 100.0,
+                        CASE
+                            WHEN config_json->>'step_growth' = 'true' THEN
+                                FLOOR(
+                                    (EXTRACT(YEAR FROM AGE(:as_of_date, start_date)) * 12 +
+                                     EXTRACT(MONTH FROM AGE(:as_of_date, start_date))) / 12.0
+                                )
+                            ELSE
+                                (EXTRACT(YEAR FROM AGE(:as_of_date, start_date)) * 12 +
+                                 EXTRACT(MONTH FROM AGE(:as_of_date, start_date))) / 12.0
+                        END
+                    ) as growth_factor
+                FROM revenue_streams
+                WHERE user_id = :user_id{portfolio_clause}
+                  AND start_date <= :as_of_date
+                  AND (end_date IS NULL OR end_date >= :as_of_date)
+            ),
             revenue_summary AS (
                 SELECT
                     COUNT(*) as stream_count,
                     COALESCE(SUM(
                         CASE
-                            WHEN period = 'monthly' THEN amount * (1 - tax_rate / 100)
-                            WHEN period = 'quarterly' THEN (amount / 3) * (1 - tax_rate / 100)
-                            WHEN period = 'yearly' THEN (amount / 12) * (1 - tax_rate / 100)
-                            ELSE amount * (1 - tax_rate / 100)
+                            WHEN period = 'monthly' THEN amount * growth_factor * (1 - tax_rate / 100)
+                            WHEN period = 'quarterly' THEN (amount / 3) * growth_factor * (1 - tax_rate / 100)
+                            WHEN period = 'yearly' THEN (amount / 12) * growth_factor * (1 - tax_rate / 100)
+                            ELSE amount * growth_factor * (1 - tax_rate / 100)
                         END
                     ), 0) as monthly_revenue
-                FROM revenue_streams
+                FROM revenue_with_growth
+            ),
+            cash_flow_summary AS (
+                SELECT
+                    COALESCE(SUM(
+                        CASE
+                            WHEN flow_type = 'withdrawal' THEN amount
+                            WHEN flow_type = 'deposit' AND from_own_capital THEN amount
+                            ELSE 0
+                        END
+                    ), 0) as monthly_outflows
+                FROM cash_flows
                 WHERE user_id = :user_id{portfolio_clause}
-                  AND start_date <= :as_of_date
-                  AND (end_date IS NULL OR end_date >= :as_of_date)
+                  AND from_date <= :as_of_date
+                  AND to_date >= :as_of_date
             )
             SELECT
                 a.asset_count,
@@ -270,10 +306,12 @@ class BaseRepository(Generic[ModelType]):
                 l.total_liabilities,
                 l.monthly_payments,
                 r.stream_count,
-                r.monthly_revenue
+                r.monthly_revenue,
+                c.monthly_outflows
             FROM asset_summary a
             CROSS JOIN loan_summary l
-            CROSS JOIN revenue_summary r;
+            CROSS JOIN revenue_summary r
+            CROSS JOIN cash_flow_summary c;
         """)
 
         params = {"user_id": user_id, "as_of_date": date.today()}
@@ -291,6 +329,7 @@ class BaseRepository(Generic[ModelType]):
                 "monthly_payments": 0.0,
                 "stream_count": 0,
                 "monthly_revenue": 0.0,
+                "monthly_outflows": 0.0,
             }
 
         return {
@@ -301,4 +340,5 @@ class BaseRepository(Generic[ModelType]):
             "monthly_payments": float(result[4]),
             "stream_count": int(result[5]),
             "monthly_revenue": float(result[6]),
+            "monthly_outflows": float(result[7]),
         }

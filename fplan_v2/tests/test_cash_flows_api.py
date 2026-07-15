@@ -12,7 +12,7 @@ from sqlalchemy import create_engine, event, JSON
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from fplan_v2.db.models import Base, User, Asset, CashFlow
+from fplan_v2.db.models import Base, User, Portfolio, Asset, CashFlow
 from fplan_v2.db.connection import get_db_session
 from fplan_v2.api.main import app
 
@@ -62,8 +62,6 @@ def override_get_db_session():
         db.close()
 
 
-app.dependency_overrides[get_db_session] = override_get_db_session
-
 client = TestClient(app)
 
 
@@ -81,11 +79,31 @@ def setup_db():
     try:
         user = User(id=1, name="Test User", email="test@fplan.local")
         db.add(user)
+        db.flush()
+        # Every seeded entity below sets portfolio_id=1, so pre-seed the matching
+        # default Portfolio row here. Without this, get_current_portfolio() would
+        # auto-create its own default portfolio (still id=1 on a fresh DB) but
+        # relying on that side effect is fragile -- seed it explicitly instead.
+        portfolio = Portfolio(id=1, user_id=1, name="Test Portfolio", is_default=True)
+        db.add(portfolio)
         db.commit()
     finally:
         db.close()
 
+    # See test_projections_integration.py::setup_db for why this is applied/restored
+    # per-test rather than once at module import: multiple integration test files in
+    # this directory patch the same shared `app.dependency_overrides[get_db_session]`,
+    # and only the last-imported module's override would otherwise win for the whole
+    # run.
+    previous_override = app.dependency_overrides.get(get_db_session)
+    app.dependency_overrides[get_db_session] = override_get_db_session
+
     yield
+
+    if previous_override is not None:
+        app.dependency_overrides[get_db_session] = previous_override
+    else:
+        app.dependency_overrides.pop(get_db_session, None)
 
     Base.metadata.drop_all(bind=engine)
 
@@ -96,6 +114,7 @@ def _seed_asset_with_cash_flows():
     try:
         asset = Asset(
             user_id=1,
+            portfolio_id=1,
             external_id="stock-cf",
             asset_type="stock",
             name="Stock with CFs",
@@ -112,6 +131,7 @@ def _seed_asset_with_cash_flows():
 
         cf1 = CashFlow(
             user_id=1,
+            portfolio_id=1,
             flow_type="deposit",
             target_asset_id=asset.id,
             name="Monthly deposit",
@@ -122,6 +142,7 @@ def _seed_asset_with_cash_flows():
         )
         cf2 = CashFlow(
             user_id=1,
+            portfolio_id=1,
             flow_type="deposit",
             target_asset_id=asset.id,
             name="Bonus deposit",
@@ -132,6 +153,7 @@ def _seed_asset_with_cash_flows():
         )
         cf3 = CashFlow(
             user_id=1,
+            portfolio_id=1,
             flow_type="withdrawal",
             target_asset_id=asset.id,
             name="Emergency fund",
@@ -181,6 +203,7 @@ class TestCashFlowsAPI:
         try:
             asset = Asset(
                 user_id=1,
+                portfolio_id=1,
                 external_id="empty-cf",
                 asset_type="cash",
                 name="No CFs",
