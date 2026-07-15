@@ -8,6 +8,7 @@ import {
   XAxis,
   YAxis,
   CartesianGrid,
+  ReferenceLine,
   Tooltip,
   ResponsiveContainer,
 } from 'recharts';
@@ -45,6 +46,7 @@ function formatTooltipValue(value: number) {
 
 function AssetBreakdownChartInner({ assetProjections, scenarioAssetProjections, scenarioName }: AssetBreakdownChartProps) {
   const { t } = useTranslation();
+  const todayLabel = formatChartDate(new Date().toISOString());
   const [hiddenAssets, setHiddenAssets] = useState<Set<string>>(new Set());
 
   const toggleAsset = useCallback((assetName: string) => {
@@ -194,6 +196,14 @@ function AssetBreakdownChartInner({ assetProjections, scenarioAssetProjections, 
       <ResponsiveContainer width="100%" height={300}>
         <ComposedChart data={chartData} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
           <CartesianGrid strokeDasharray="3 3" />
+          <ReferenceLine
+            x={todayLabel}
+            stroke="#64748b"
+            strokeDasharray="4 4"
+            strokeWidth={1.5}
+            ifOverflow="extendDomain"
+            label={{ value: t('charts.today'), position: 'top', fill: '#64748b', fontSize: 11 }}
+          />
           <XAxis dataKey="date" />
           <YAxis tickFormatter={formatYAxis} />
           <Tooltip content={<ChartTooltip formatValue={formatTooltipValue} />} />

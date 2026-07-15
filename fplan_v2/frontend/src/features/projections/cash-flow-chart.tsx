@@ -6,6 +6,7 @@ import {
   XAxis,
   YAxis,
   CartesianGrid,
+  ReferenceLine,
   Tooltip,
   ResponsiveContainer,
 } from 'recharts';
@@ -44,6 +45,7 @@ function formatTooltipValue(value: number) {
 
 function CashFlowChartInner({ data, breakdown, scenarioBreakdown, scenarioName }: CashFlowChartProps) {
   const { t } = useTranslation();
+  const todayLabel = formatChartDate(new Date().toISOString());
   const [hiddenSeries, setHiddenSeries] = useState<Set<string>>(new Set());
 
   // Build per-source series from breakdown items, deduplicating by source_name
@@ -182,6 +184,14 @@ function CashFlowChartInner({ data, breakdown, scenarioBreakdown, scenarioName }
       <ResponsiveContainer width="100%" height={350}>
         <ComposedChart data={chartDataWithScenario} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
           <CartesianGrid strokeDasharray="3 3" />
+          <ReferenceLine
+            x={todayLabel}
+            stroke="#64748b"
+            strokeDasharray="4 4"
+            strokeWidth={1.5}
+            ifOverflow="extendDomain"
+            label={{ value: t('charts.today'), position: 'top', fill: '#64748b', fontSize: 11 }}
+          />
           <XAxis dataKey="date" />
           <YAxis tickFormatter={formatYAxis} />
           <Tooltip content={<ChartTooltip formatValue={formatTooltipValue} />} />

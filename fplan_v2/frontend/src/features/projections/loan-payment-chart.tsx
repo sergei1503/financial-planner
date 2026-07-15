@@ -6,6 +6,7 @@ import {
   XAxis,
   YAxis,
   CartesianGrid,
+  ReferenceLine,
   Tooltip,
   Legend,
   ResponsiveContainer,
@@ -48,6 +49,7 @@ function formatTooltipValue(value: number) {
 
 function LoanPaymentChartInner({ loanProjections, scenarioLoanProjections, scenarioName }: LoanPaymentChartProps) {
   const { t } = useTranslation();
+  const todayLabel = formatChartDate(new Date().toISOString());
 
   if (loanProjections.length === 0) return null;
 
@@ -88,6 +90,14 @@ function LoanPaymentChartInner({ loanProjections, scenarioLoanProjections, scena
     <ResponsiveContainer width="100%" height={300}>
       <BarChart data={chartData} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
         <CartesianGrid strokeDasharray="3 3" />
+        <ReferenceLine
+          x={todayLabel}
+          stroke="#64748b"
+          strokeDasharray="4 4"
+          strokeWidth={1.5}
+          ifOverflow="extendDomain"
+          label={{ value: t('charts.today'), position: 'top', fill: '#64748b', fontSize: 11 }}
+        />
         <XAxis dataKey="date" />
         <YAxis tickFormatter={formatYAxis} />
         <Tooltip formatter={(value) => formatTooltipValue(Number(value))} />

@@ -7,6 +7,7 @@ import {
   XAxis,
   YAxis,
   CartesianGrid,
+  ReferenceLine,
   Tooltip,
   Legend,
   ResponsiveContainer,
@@ -58,6 +59,7 @@ function NetWorthChartInner({
   scenarioName,
 }: NetWorthChartProps) {
   const { t } = useTranslation();
+  const todayLabel = formatChartDate(new Date().toISOString());
 
   type MergedData = {
     date: string;
@@ -136,6 +138,14 @@ function NetWorthChartInner({
     <ResponsiveContainer width="100%" height={400}>
       <ComposedChart data={merged} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
         <CartesianGrid strokeDasharray="3 3" />
+        <ReferenceLine
+          x={todayLabel}
+          stroke="#64748b"
+          strokeDasharray="4 4"
+          strokeWidth={1.5}
+          ifOverflow="extendDomain"
+          label={{ value: t('charts.today'), position: 'top', fill: '#64748b', fontSize: 11 }}
+        />
         <XAxis dataKey="date" />
         <YAxis tickFormatter={formatYAxis} />
         <Tooltip content={<ChartTooltip formatValue={formatTooltipValue} />} />
