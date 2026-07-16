@@ -221,6 +221,12 @@
   "cash_flows.deposit_origin_description": "בחר אם ההפקדה מגיעה מהון עצמי (הוצאה) או מתרומת מעסיק (הכנסה)",
   "cash_flows.deposit_origin_own": "הון עצמי (הוצאה)",
   "cash_flows.deposit_origin_employer": "תרומת מעסיק (הכנסה)",
+  "cash_flows.growth_mode": "צמיחה לאורך זמן",
+  "cash_flows.growth_mode_description": "כיצד הסכום משתנה לאורך התקופה הפעילה — למשל שכר דירה שעולה מדי שנה.",
+  "cash_flows.growth_mode_none": "קבוע (ללא צמיחה)",
+  "cash_flows.growth_mode_smooth": "צמיחה שנתית חלקה",
+  "cash_flows.growth_mode_stepped": "מדורגת (פעם בשנה)",
+  "cash_flows.growth_rate": "שיעור צמיחה שנתי (%)",
 
   "measurements.history": "היסטוריית מדידות",
   "measurements.no_measurements": "אין מדידות עדיין. השתמש בכפתור הרישום להוספת מדידה ראשונה.",

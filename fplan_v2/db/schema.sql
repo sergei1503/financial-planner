@@ -122,9 +122,12 @@ CREATE TABLE cash_flows (
     from_date DATE NOT NULL,
     to_date DATE NOT NULL,
     from_own_capital BOOLEAN DEFAULT false,
+    growth_rate NUMERIC(5, 2) DEFAULT 0,          -- annual % (0 = flat)
+    growth_mode TEXT DEFAULT 'none',              -- 'none' | 'smooth' | 'stepped'
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     CHECK (flow_type IN ('deposit', 'withdrawal')),
-    CHECK (from_date <= to_date)
+    CHECK (from_date <= to_date),
+    CHECK (growth_mode IN ('none', 'smooth', 'stepped'))
 );
 
 CREATE INDEX idx_cash_flows_user_id ON cash_flows(user_id);

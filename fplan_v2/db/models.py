@@ -233,6 +233,10 @@ class CashFlow(Base):
     from_date = Column(Date, nullable=False)
     to_date = Column(Date, nullable=False)
     from_own_capital = Column(Boolean, default=False)
+    # Escalation: 'none' (flat, default), 'smooth' (monthly-compounded annual growth),
+    # or 'stepped' (grows once/year on the anniversary). growth_rate is annual percent.
+    growth_rate = Column(Numeric(5, 2), default=0)
+    growth_mode = Column(Text, default="none")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     # Relationships
@@ -243,6 +247,9 @@ class CashFlow(Base):
     __table_args__ = (
         CheckConstraint("flow_type IN ('deposit', 'withdrawal')", name="ck_cash_flow_type"),
         CheckConstraint("from_date <= to_date", name="ck_cash_flow_dates"),
+        CheckConstraint(
+            "growth_mode IN ('none', 'smooth', 'stepped')", name="ck_cash_flow_growth_mode"
+        ),
         Index("idx_cash_flows_user_id", "user_id"),
         Index("idx_cash_flows_asset_id", "target_asset_id"),
         Index("idx_cash_flows_type", "flow_type"),

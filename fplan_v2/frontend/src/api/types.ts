@@ -157,6 +157,14 @@ export const CashFlowType = {
 } as const;
 export type CashFlowType = (typeof CashFlowType)[keyof typeof CashFlowType];
 
+// How a cash flow's amount escalates over its active window.
+export const GrowthMode = {
+  NONE: 'none',        // flat amount (default)
+  SMOOTH: 'smooth',    // (1 + rate)^years, compounded monthly
+  STEPPED: 'stepped',  // steps once per year on the anniversary
+} as const;
+export type GrowthMode = (typeof GrowthMode)[keyof typeof GrowthMode];
+
 export interface CashFlowResponse {
   id: number;
   user_id: number;
@@ -167,6 +175,8 @@ export interface CashFlowResponse {
   from_date: string;
   to_date: string;
   from_own_capital: boolean;
+  growth_rate: number;
+  growth_mode: GrowthMode;
   created_at: string;
 }
 

@@ -218,6 +218,12 @@
   "cash_flows.deposit_origin_description": "Choose whether this deposit comes from your own capital (expense) or from employer contribution (income)",
   "cash_flows.deposit_origin_own": "Own Capital (Expense)",
   "cash_flows.deposit_origin_employer": "Employer Contribution (Income)",
+  "cash_flows.growth_mode": "Growth over time",
+  "cash_flows.growth_mode_description": "How this amount changes over its active period — e.g. rent that rises each year.",
+  "cash_flows.growth_mode_none": "Flat (no growth)",
+  "cash_flows.growth_mode_smooth": "Smooth annual growth",
+  "cash_flows.growth_mode_stepped": "Stepped (once a year)",
+  "cash_flows.growth_rate": "Annual growth rate (%)",
 
   "placeholders.search": "Search...",
   "placeholders.enter_name": "Enter name",

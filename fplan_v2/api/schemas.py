@@ -63,6 +63,14 @@ class CashFlowType(str, Enum):
     WITHDRAWAL = "withdrawal"
 
 
+class GrowthMode(str, Enum):
+    """How a cash flow's amount escalates over its active window."""
+
+    NONE = "none"        # flat amount (default)
+    SMOOTH = "smooth"    # amount * (1 + growth_rate/100)^years, compounded monthly
+    STEPPED = "stepped"  # grows once per year on the anniversary (flat within each year)
+
+
 # ======================
 # Base Schemas
 # ======================
@@ -236,6 +244,8 @@ class CashFlowCreate(BaseSchema):
     to_date: date
     target_asset_id: Optional[int] = None
     from_own_capital: bool = True
+    growth_rate: Decimal = Field(default=0, ge=-100, le=1000)
+    growth_mode: GrowthMode = GrowthMode.NONE
 
 
 class CashFlowUpdate(BaseSchema):
@@ -247,6 +257,8 @@ class CashFlowUpdate(BaseSchema):
     to_date: Optional[date] = None
     target_asset_id: Optional[int] = None
     from_own_capital: Optional[bool] = None
+    growth_rate: Optional[Decimal] = Field(None, ge=-100, le=1000)
+    growth_mode: Optional[GrowthMode] = None
 
 
 class CashFlowResponse(BaseSchema):
@@ -261,6 +273,8 @@ class CashFlowResponse(BaseSchema):
     from_date: date
     to_date: date
     from_own_capital: bool = False
+    growth_rate: Decimal = 0
+    growth_mode: GrowthMode = GrowthMode.NONE
     created_at: datetime
 
 

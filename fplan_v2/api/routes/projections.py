@@ -7,6 +7,7 @@ Provides financial projection and portfolio analysis endpoints.
 import hashlib
 import json
 import logging
+import math
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Dict, Any, List
@@ -512,6 +513,28 @@ def _project_standalone_revenue_streams(
     return items
 
 
+def _cash_flow_growth_factor(
+    growth_mode: str, growth_rate_pct: float, cf_start: pd.Timestamp, ts: pd.Timestamp
+) -> float:
+    """
+    Escalation factor for a cash flow's amount at month `ts`, relative to its `cf_start`.
+
+    - 'none'    -> 1.0 (flat; the default, keeps existing projections byte-identical)
+    - 'smooth'  -> (1 + r)^years, years measured continuously (monthly-compounded annual growth)
+    - 'stepped' -> (1 + r)^floor(years), flat within each year, steps on the anniversary
+
+    Mirrors the growth math already used for salary (`_project_standalone_revenue_streams`)
+    and stepped rent (`RentRevenueStream.get_cash_flow`), so income and expenses escalate
+    the same way.
+    """
+    if growth_mode not in ("smooth", "stepped") or growth_rate_pct == 0:
+        return 1.0
+    years_elapsed = (ts.year - cf_start.year) + (ts.month - cf_start.month) / 12.0
+    if growth_mode == "stepped":
+        years_elapsed = math.floor(years_elapsed)
+    return (1 + growth_rate_pct / 100.0) ** years_elapsed
+
+
 def _project_standalone_cash_flows(
     db: Session, user_id: int, all_dates: list, portfolio_id: int = None,
 ) -> List[CashFlowItem]:
@@ -520,6 +543,9 @@ def _project_standalone_cash_flows(
 
     These are general income/expense items like rent payments, utilities,
     side income, etc. that the user added without linking to an asset.
+
+    An expenditure can escalate over its active window via `growth_mode`/`growth_rate`
+    (e.g. "rent we pay, growing 3%/yr") instead of staying flat.
 
     Returns a list of CashFlowItem objects for the breakdown.
     """
@@ -532,11 +558,16 @@ def _project_standalone_cash_flows(
         cf_start = pd.Timestamp(cf.from_date).replace(day=1)
         cf_end = pd.Timestamp(cf.to_date).replace(day=1)
         amount = float(cf.amount)
+        growth_mode = getattr(cf, "growth_mode", "none") or "none"
+        growth_rate_pct = float(getattr(cf, "growth_rate", 0) or 0)
 
         series = []
         for dt in all_dates:
             ts = dt if isinstance(dt, pd.Timestamp) else pd.Timestamp(dt)
-            val = amount if cf_start <= ts <= cf_end else 0.0
+            if cf_start <= ts <= cf_end:
+                val = amount * _cash_flow_growth_factor(growth_mode, growth_rate_pct, cf_start, ts)
+            else:
+                val = 0.0
             series.append(TimeSeriesDataPoint(
                 date=dt.date() if isinstance(dt, pd.Timestamp) else dt,
                 value=Decimal(str(val)),

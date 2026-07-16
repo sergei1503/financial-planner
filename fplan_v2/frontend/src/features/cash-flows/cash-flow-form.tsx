@@ -45,6 +45,8 @@ const cashFlowSchema = z.object({
   to_date: z.string().min(1),
   target_asset_id: z.number().nullable(),
   from_own_capital: z.boolean(),
+  growth_mode: z.enum(['none', 'smooth', 'stepped']),
+  growth_rate: z.number(),
 });
 
 type CashFlowFormValues = z.infer<typeof cashFlowSchema>;
@@ -95,10 +97,13 @@ export function CashFlowForm({ open, onOpenChange, cashFlow, initialAssetId }: C
       to_date: cashFlow?.to_date?.slice(0, 10) ?? '',
       target_asset_id: cashFlow?.target_asset_id ?? initialAssetId ?? null,
       from_own_capital: cashFlow?.from_own_capital ?? true,
+      growth_mode: cashFlow?.growth_mode ?? 'none',
+      growth_rate: cashFlow?.growth_rate ?? 0,
     },
   });
 
   const flowType = form.watch('flow_type');
+  const growthMode = form.watch('growth_mode');
 
   useEffect(() => {
     if (open) {
@@ -110,12 +115,18 @@ export function CashFlowForm({ open, onOpenChange, cashFlow, initialAssetId }: C
         to_date: cashFlow?.to_date?.slice(0, 10) ?? '',
         target_asset_id: cashFlow?.target_asset_id ?? initialAssetId ?? null,
         from_own_capital: cashFlow?.from_own_capital ?? true,
+        growth_mode: cashFlow?.growth_mode ?? 'none',
+        growth_rate: cashFlow?.growth_rate ?? 0,
       });
     }
   }, [open, cashFlow, initialAssetId, form]);
 
   async function onSubmit(values: CashFlowFormValues) {
     try {
+      const growthPayload = {
+        growth_mode: values.growth_mode,
+        growth_rate: values.growth_mode === 'none' ? 0 : values.growth_rate,
+      };
       if (isEditing) {
         await updateMutation.mutateAsync({
           id: cashFlow.id,
@@ -126,6 +137,7 @@ export function CashFlowForm({ open, onOpenChange, cashFlow, initialAssetId }: C
             to_date: values.to_date,
             target_asset_id: values.target_asset_id,
             from_own_capital: values.from_own_capital,
+            ...growthPayload,
           },
         });
       } else {
@@ -137,6 +149,7 @@ export function CashFlowForm({ open, onOpenChange, cashFlow, initialAssetId }: C
           to_date: values.to_date,
           target_asset_id: values.target_asset_id,
           from_own_capital: values.from_own_capital,
+          ...growthPayload,
         });
       }
       toast.success(t('messages.data_saved'));
@@ -219,6 +232,52 @@ export function CashFlowForm({ open, onOpenChange, cashFlow, initialAssetId }: C
                 </FormItem>
               )}
             />
+
+            <FormField
+              control={form.control}
+              name="growth_mode"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>{t('cash_flows.growth_mode')}</FormLabel>
+                  <Select onValueChange={field.onChange} value={field.value}>
+                    <FormControl>
+                      <SelectTrigger className="w-full">
+                        <SelectValue />
+                      </SelectTrigger>
+                    </FormControl>
+                    <SelectContent>
+                      <SelectItem value="none">{t('cash_flows.growth_mode_none')}</SelectItem>
+                      <SelectItem value="smooth">{t('cash_flows.growth_mode_smooth')}</SelectItem>
+                      <SelectItem value="stepped">{t('cash_flows.growth_mode_stepped')}</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <FormDescription>{t('cash_flows.growth_mode_description')}</FormDescription>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
+            {growthMode !== 'none' && (
+              <FormField
+                control={form.control}
+                name="growth_rate"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>{t('cash_flows.growth_rate')}</FormLabel>
+                    <FormControl>
+                      <NumberInput
+                        type="number"
+                        step="0.1"
+                        placeholder="3"
+                        value={field.value}
+                        onChange={field.onChange}
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            )}
 
             {flowType === CashFlowType.DEPOSIT && (
               <FormField
