@@ -1209,14 +1209,30 @@ def compute_projection(
     if cash_flow_breakdown.net_series:
         cash_flow_series = cash_flow_breakdown.net_series
 
-    # Build accumulated cash asset from cumulative net cash flow
-    # This represents the running sum of surplus (or deficit) cash over time
+    # Build the accumulated-cash virtual asset from the operating cash flow that is NOT already
+    # in the real cash asset. Asset-attached items (entity_type == "asset": rent, dividends,
+    # pension payouts, own-capital deposits) are already folded into the cash balance by
+    # _apply_cash_conversions; integrating them here too would double-count them in net worth
+    # (see ADR-0004). Only loan payments (entity_type "loan") and standalone revenue / cash
+    # flows (entity_type None) are integrated here. The display breakdown and
+    # monthly_cash_flow_series above stay gross (all items) — this filter is net-worth-only.
     if cash_flow_breakdown.net_series:
+        integrated_net_by_date: Dict[Any, float] = {}
+        for item in cash_flow_breakdown.items:
+            if item.entity_type == "asset":
+                continue  # already in the real cash asset — don't double-count
+            sign = 1.0 if item.source_type == "income" else -1.0
+            for point in item.time_series:
+                integrated_net_by_date[point.date] = (
+                    integrated_net_by_date.get(point.date, 0.0) + sign * float(point.value)
+                )
+
+        # Running sum of surplus (or deficit) cash over time; iterate net_series to preserve the
+        # canonical date order. Allow negatives (overdraft) to surface honestly.
         accumulated_cash_series: List[TimeSeriesDataPoint] = []
         cumulative = 0.0
         for point in cash_flow_breakdown.net_series:
-            cumulative += float(point.value)
-            # Allow negative values to show when strategy leads to bank overdraft
+            cumulative += integrated_net_by_date.get(point.date, 0.0)
             accumulated_cash_series.append(TimeSeriesDataPoint(
                 date=point.date,
                 value=Decimal(str(round(cumulative, 2))),
