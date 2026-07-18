@@ -7,6 +7,7 @@ Supports three modes:
 3. Single-user mode: Falls back to user_id=1 for self-hosted open-source usage
 """
 
+import hmac
 import logging
 import os
 from typing import Optional
@@ -27,6 +28,12 @@ from fplan_v2.db.models import Portfolio, User
 CLERK_SECRET_KEY = os.getenv("CLERK_SECRET_KEY")
 CLERK_ISSUER = os.getenv("CLERK_ISSUER")  # e.g., https://clerk.your-domain.com
 CLERK_JWKS_URL = f"{CLERK_ISSUER}/.well-known/jwks.json" if CLERK_ISSUER else None
+
+# Service token: a static bearer for a trusted read-only backend (Family OS). Maps to a fixed
+# household Clerk identity and skips Clerk's session TTL, so a headless server never needs to
+# refresh a short-lived token. Only active when both env vars are set.
+FPLAN_SERVICE_TOKEN = os.getenv("FPLAN_SERVICE_TOKEN")
+FPLAN_SERVICE_CLERK_ID = os.getenv("FPLAN_SERVICE_CLERK_ID")
 
 # Demo user convention: clerk_id="demo"
 DEMO_CLERK_ID = "demo"
@@ -151,6 +158,17 @@ async def get_current_user(
             detail="Authentication required",
             headers={"WWW-Authenticate": "Bearer"},
         )
+
+    # Service-token mode: a static server-to-server bearer (Family OS, read-only path). Resolves
+    # to a fixed household identity and skips Clerk JWT verification, so it never expires.
+    if FPLAN_SERVICE_TOKEN and hmac.compare_digest(credentials.credentials, FPLAN_SERVICE_TOKEN):
+        svc_user = db.query(User).filter_by(clerk_id=FPLAN_SERVICE_CLERK_ID).first()
+        if not svc_user:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="FPLAN_SERVICE_CLERK_ID has no matching user",
+            )
+        return svc_user
 
     try:
         payload = _verify_clerk_token(credentials.credentials)
