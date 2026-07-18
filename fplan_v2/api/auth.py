@@ -161,7 +161,7 @@ async def get_current_user(
 
     # Service-token mode: a static server-to-server bearer (Family OS, read-only path). Resolves
     # to a fixed household identity and skips Clerk JWT verification, so it never expires.
-    if FPLAN_SERVICE_TOKEN and hmac.compare_digest(credentials.credentials, FPLAN_SERVICE_TOKEN):
+    if FPLAN_SERVICE_TOKEN and FPLAN_SERVICE_CLERK_ID and hmac.compare_digest(credentials.credentials, FPLAN_SERVICE_TOKEN):
         svc_user = db.query(User).filter_by(clerk_id=FPLAN_SERVICE_CLERK_ID).first()
         if not svc_user:
             raise HTTPException(
