@@ -1,6 +1,6 @@
 # ADR 0004: Fix the operating-cash-flow double-count in net worth
 
-- **Status:** accepted (implemented 2026-07-17, branch `feat/cashflow-growth`; golden re-baselined; portfolio 1 30-yr net worth −18.6%)
+- **Status:** accepted · **deployed to production 2026-07-18** (merged to `main` `07ff7f5`; migration 005 on Neon; `vercel --prod`). Golden re-baselined; prod pf4 30-yr net worth −18.6%.
 - **Date:** 2026-07-16
 - **Deciders:** Owner (Sergei) — chose "fix the double-count (ADR-0004)" after ADR-0003's premise was found wrong
 - **Related:** ADR-0003 (superseded — the premise correction that surfaced this bug), ADR-0002 (golden-master rule), `docs/standards.md#golden-master-rule`, `docs/plan.md`, `progress.md` (open question: should the accumulated-cash virtual asset exist)

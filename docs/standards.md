@@ -35,6 +35,20 @@ Keep this current; delete anything an agent can infer from the code.
   them by weakening tests; a green model suite is the M1 gate.
 - **Frontend:** no unit-test runner wired up; verify UI changes manually via the dev server.
 
+## Deploy & production migrations
+Production is **Vercel** (frontend + FastAPI serverless at `api/index.py`) backed by **Neon**
+(`NEON_DATABASE_URL`). Deploys are **manual** — `git push` does not deploy on its own.
+
+- **Golden rule — schema-first.** Apply any new `fplan_v2/migrations/*.sql` to the Neon prod DB
+  **before** deploying code that reads the new columns, or the deployed app 500s on the missing
+  schema. Order: **migrate Neon → `vercel --prod --yes` → verify `/health`.**
+- Writes to prod still go through `BaseRepository` (bumps `portfolio_version`, invalidates the
+  projection cache — a code-only fix isn't reflected for a user until their version bumps).
+- **Exact connection commands, the Neon project id, and the prod user/portfolio map live in the
+  gitignored `fplan_v2/docs/DATABASE_ACCESS.local.md`** (kept off this public repo — no secrets
+  here). Neon is reached via `neonctl`; note the `.env` `NEON_DATABASE_URL` points at a firewalled
+  box, not prod, so use `neonctl` for real production.
+
 ## Golden-master rule
 The projection is golden-master. Any change to `compute_projection` or `fplan_v2/core` that
 is meant to be behavior-preserving (e.g. the M1 vectorization) MUST be guarded by a snapshot
